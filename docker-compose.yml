@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dataen
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  processing:
+    build: ./services/processing
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/dataen
+      LOG_ENV: dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  query-api:
+    build: ./services/query-api
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/dataen
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LOG_ENV: dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # auth, poller, ui, daily-batch: added in later milestones (see docs/milestone.md)
+
+volumes:
+  pgdata:

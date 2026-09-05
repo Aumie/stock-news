@@ -4,18 +4,18 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** _(update this line as you move through them)_
+**Current milestone:** 2 (Auth) — next up
 
 ---
 
-## 1. Core RAG loop
+## 1. Core RAG loop — done
 Static ingestion of a fixed symbol list (unstructured news) → embed → query, working end to end.
 
-- [ ] Processing service skeleton (domain/dedup logic, chunking, embeddings)
-- [ ] Query API skeleton (retrieval + LLM call, no auth yet)
-- [ ] Static/hardcoded symbol list ingestion (stand-in for the real poller)
-- [ ] Local pgvector via docker-compose
-- [ ] End-to-end check: ingest a few articles → embed → ask a question → get a grounded answer
+- [x] Processing service skeleton (domain/dedup logic, chunking, embeddings)
+- [x] Query API skeleton (retrieval + LLM call, no auth yet)
+- [x] Static/hardcoded symbol list ingestion (stand-in for the real poller)
+- [x] Local pgvector via docker-compose
+- [x] End-to-end check: ingest a few articles → embed → ask a question → get a grounded answer (LLM stubbed by default for local/cost-sensitive dev — see `decision_log.md`; retrieval and grounding verified for real against live Postgres/pgvector)
 
 ## 2. Auth
 Google OAuth2 login, user + watchlist tables.

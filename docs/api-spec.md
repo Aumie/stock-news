@@ -82,6 +82,8 @@ All endpoints require `Authorization: Bearer <jwt>`, verified locally against th
 |---|---|---|---|---|
 | `POST` | `/query` | `{ "question": "..." }` | **Streaming** (`StreamingResponse`, chunked, not buffered JSON — §4.4) — token-by-token LLM output, terminated by a final sentinel chunk | Guardrail: if retrieval is empty, the stream's content is an explicit "no news on that" answer, not silence or a generic error (§4.4). If the LLM spend ceiling is hit, the stream instead emits the honest "spending cap reached" message (§4.4) |
 
+**Milestone 1 shape, temporary**: until auth (milestone 2) lands, `/query`'s request body also carries `{ "symbols": [...] }` explicitly, since there's no JWT-derived watchlist yet to scope retrieval by (`docs/milestone.md` §1 — "no auth yet"). This field drops once milestone 2's JWT verification is wired in and retrieval is scoped from the caller's own watchlist server-side, matching the shape above exactly.
+
 - **Cost note**: this is the one endpoint where public exposure would matter more than anywhere else in the system — each hit can trigger a real LLM API call (§6). The IAM lockdown above is the only thing preventing that from being attacker-controlled.
 
 ---
