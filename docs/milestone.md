@@ -15,7 +15,7 @@ Static ingestion of a fixed symbol list (unstructured news) → embed → query,
 - [x] Query API skeleton (retrieval + LLM call, no auth yet)
 - [x] Static/hardcoded symbol list ingestion (stand-in for the real poller)
 - [x] Local pgvector via docker-compose
-- [x] End-to-end check: ingest a few articles → embed → ask a question → get a grounded answer (LLM stubbed by default for local/cost-sensitive dev — see `decision_log.md`; retrieval and grounding verified for real against live Postgres/pgvector)
+- [x] End-to-end check: ingest a few articles → embed → ask a question → get a grounded answer (LLM stubbed by default for local/cost-sensitive dev — see `decision_log_claude.md`; retrieval and grounding verified for real against live Postgres/pgvector)
 
 ## 2. Auth
 Google OAuth2 login, user + watchlist tables.

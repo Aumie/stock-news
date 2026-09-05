@@ -97,7 +97,8 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │
 ├── docs/
 │   ├── stock-news-digest-requirements.md   # the spec
-│   ├── decision_log.md                     # the why, by topic
+│   ├── decision_log.md                     # the why, by topic — decisions the user made/directed
+│   ├── decision_log_claude.md              # implementation-level judgment calls made while coding
 │   ├── api-spec.md                         # this file's sibling
 │   ├── er-diagram.md
 │   ├── project-structure.md                # this file

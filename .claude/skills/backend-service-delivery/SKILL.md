@@ -31,6 +31,8 @@ Every non-obvious choice (a field added beyond what the spec literally asked for
 
 Write entries as **the decision, then why** — the "why" is the entire value of the log; a list of what changed is already visible in git history.
 
+If the project keeps separate logs for decisions the user made/directed versus judgment calls made autonomously while coding, write each entry to the log that matches who actually decided it — not by which one is open or which topic seems more "technical." A library pinned, a bug fixed a particular way, or a data structure chosen without being asked belongs in the autonomous-decisions log even if it looks minor; a choice the user explicitly made or approved belongs in the user's log even if it came up mid-implementation. When unsure which log an entry belongs in, that uncertainty is itself worth surfacing to the person rather than guessing.
+
 ## 4. Keep planning docs in sync with code, in the same turn
 
 Whenever a code change would make a planning doc (API spec, ER diagram, project-structure doc, README) inaccurate, fix the doc in the same turn — not as a separate cleanup pass, and not only when explicitly asked. Treat what a doc currently claims as a claim to verify against the code, not a fact — docs citing each other can create a closed loop that all agree with one another while none of them agree with reality. A new file, a new validation rule, a new event type, or a changed error code should be reflected everywhere it's already documented before moving on.

@@ -1,6 +1,6 @@
 """Real end-to-end check for milestone 1 (docs/milestone.md §1): given
 articles already embedded in Postgres/pgvector, verify PgVectorRetriever +
-QueryService produce a grounded answer (LLM stubbed — see docs/decision_log.md
+QueryService produce a grounded answer (LLM stubbed — see docs/decision_log_claude.md
 on why a real paid LLM call isn't part of the automated suite).
 
 Requires a running Postgres from `docker compose up postgres`.
