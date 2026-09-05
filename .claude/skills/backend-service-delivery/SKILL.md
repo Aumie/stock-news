@@ -57,11 +57,30 @@ When the person's instinct reaches for a pattern from a language/framework they 
 
 Only claim something is tested, working, or verified after actually checking it. If the environment can't support real verification right now (no Docker available, no network access, a dependency that can't be reached), say exactly that, explicitly, rather than describing an unverified change the way a verified one would be described. This applies just as much to your own decision-log/doc entries as to what you tell the person directly — a comment saying "verified against Postgres" is itself a claim that needs to have actually happened.
 
+## 10. Watch for infrastructure traps that only surface when you actually build/run the thing
+
+Some bugs aren't in the application logic at all — they're in the build/deploy plumbing, and unit tests (and even a build that reports success) will never catch them. A few recurring shapes, all found by actually building and running the stack, not by reading the Dockerfile:
+
+- **A dependency silently pulling GPU/CUDA wheels when only CPU is needed.** ML libraries (torch, and anything that depends on it) often resolve to a CUDA-enabled build by default, adding gigabytes of NVIDIA packages neither the code nor the deployment target uses. If the service has no GPU, pin the CPU-only wheel index explicitly — and verify the pin actually took effect (check the lockfile's resolved source), since a source override on a *transitive* dependency can be silently ignored unless that package is also listed as a direct dependency.
+- **A missing `.dockerignore` letting a host-built artifact overwrite the container's own.** `COPY . .` after a build-time install step (`uv sync`, `npm ci`, etc.) will copy a local `.venv`/`node_modules`/build output from the host straight over the correctly-built one inside the image, if nothing excludes it. The symptom is subtle: the container still starts, just by silently reinstalling everything from scratch on every single startup, since the runtime detects a broken/foreign environment. If a container that should start in seconds is instead reinstalling dependencies every time `docker compose up` runs, check `.dockerignore` before anything else.
+- **A long-running build or command with no output isn't necessarily stuck.** Some tools (background test runners, large dependency installs) can go silent for a long stretch of genuine progress. Check for actual signals (process still alive, disk/cache size still growing, a completion notification) before assuming a hang and killing it — killing a process at the exact moment it's finishing can itself corrupt the output and cost more time than waiting would have.
+
+## 11. Decide the stub-vs-real path for paid external APIs before writing the real client, not after a crash
+
+When a service calls a paid third-party API (an LLM, a metered data provider), decide up front — ideally by asking the person, since this is a cost/tradeoff call they should make — whether local/dev runs use a real key or a stub, and wire both paths into the actual constructor/dependency-injection code from the start. Two failure modes to avoid:
+
+- **Treating a missing credential as the same condition as a legitimate API-level failure** (e.g. a rate limit or spend cap). A missing key is a deploy-time configuration error — fail fast and loudly with a clear message at construction time, not deep inside a request handler, and never silently relabel it as the API's own honest "cap reached" message; conflating the two misrepresents what's actually wrong.
+- **Leaving the stub path as an afterthought bolted on post-crash.** If a stub is the agreed approach for cost-sensitive local dev, wire it into the actual application startup (e.g. "use the stub client when no key is configured, log a clear warning") in the same change that adds the real client — don't wait for the missing-key case to crash first.
+
+## 12. Integration tests that share one live dependency need explicit isolation or explicit sequencing
+
+When multiple services/test suites are verified against the same real, shared resource (one docker-compose Postgres, one Redis instance), running their integration suites concurrently can produce failures that look like real bugs but are actually cross-suite interference (one suite's cleanup racing another's setup, both writing to the same tables). Before concluding a live-infra test failure is a real regression, try reproducing it: (a) in isolation, and (b) sequentially rather than in parallel with any other suite touching the same resource. If the failure only appears under concurrent access to a shared dependency, that's a real, worth-documenting limitation of the test setup (each suite needs its own database/schema, or the suites must not run in parallel) — not a reason to skip investigating, and not a reason to assume the code itself is broken.
+
 ## Reusable rhythm for a typical change
 
 1. Make the change.
 2. Verify locally (§1) — build/vet/fmt/test.
-3. Verify live if the real stack is reachable (§2).
+3. Verify live if the real stack is reachable (§2) — watch for build/deploy-plumbing traps, not just application bugs (§10), and if a live-infra test fails unexpectedly, check whether it reproduces in isolation before calling it a regression (§12).
 4. Sync any doc the change makes inaccurate (§4).
 5. Log the decision if it was non-obvious (§3).
 6. Add a regression test if this was a bug fix or new non-obvious behavior (§7).
