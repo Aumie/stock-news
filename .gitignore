@@ -15,6 +15,7 @@ services/*/tmp/
 .env
 .env.*
 !.env.example
+services/ui/.streamlit/secrets.toml
 
 # IDE
 .vscode/

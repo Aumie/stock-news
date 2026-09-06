@@ -4,6 +4,7 @@ import pytest
 
 from application.process_article import ProcessArticleUseCase
 from domain.article import Article
+from domain.dedup import content_hash, fuzzy_key
 
 
 class FakeRepo:
@@ -42,6 +43,25 @@ class FakeRepo:
         self.symbols.add((article_id, symbol))
 
 
+class FakeDedupPrecheck:
+    """Mirrors FakeRepo's known-article state so the pre-check phase sees the
+    same world the transactional insert calls would.
+    """
+
+    def __init__(self, repo: "FakeRepo"):
+        self._repo = repo
+
+    def find_existing(self, article):
+        if article.canonical_url:
+            return self._repo.by_url.get(article.canonical_url)
+
+        existing = self._repo.by_hash.get(content_hash(article))
+        if existing is not None:
+            return existing
+
+        return self._repo.by_fuzzy.get(fuzzy_key(article))
+
+
 class FakeChunker:
     def chunk(self, text):
         return [text]
@@ -64,6 +84,23 @@ class FakeEmbeddingWriter:
         self.writes.append((article_id, chunks, vectors))
 
 
+class FakeUnitOfWork:
+    """Mirrors PostgresUnitOfWork's __enter__/__exit__ contract, but backed by
+    a single shared FakeRepo/FakeEmbeddingWriter instead of a real transaction
+    — enough to exercise ProcessArticleUseCase's UnitOfWork usage without a DB.
+    """
+
+    def __init__(self, repo, embedding_writer):
+        self.repo = repo
+        self.embedding_writer = embedding_writer
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+
 def _article(**overrides) -> Article:
     defaults = dict(
         source="finnhub",
@@ -82,7 +119,12 @@ def use_case():
     chunker = FakeChunker()
     embedder = FakeEmbedder()
     writer = FakeEmbeddingWriter()
-    uc = ProcessArticleUseCase(repo=repo, chunker=chunker, embedder=embedder, embedding_writer=writer)
+    uc = ProcessArticleUseCase(
+        uow_factory=lambda: FakeUnitOfWork(repo, writer),
+        dedup_precheck=FakeDedupPrecheck(repo),
+        chunker=chunker,
+        embedder=embedder,
+    )
     return uc, repo, embedder, writer
 
 
@@ -146,3 +188,33 @@ class TestTier3FuzzyCrossSource:
 
         assert ("article-1", "AAPL") in repo.symbols
         assert ("article-1", "MSFT") in repo.symbols
+
+
+class TestRaceBetweenPrecheckAndTransaction:
+    def test_embedding_discarded_not_written_if_duplicate_appears_between_precheck_and_transaction(
+        self, use_case
+    ):
+        # Regression guard for the race the two-phase design must not
+        # reintroduce: the read-only pre-check says "new" (nothing registered
+        # yet), but by the time the transaction runs, a concurrent writer has
+        # already inserted the same content_hash. The already-computed
+        # embedding must be discarded, not written against a symbol id the
+        # transaction says wasn't newly inserted.
+        uc, repo, embedder, writer = use_case
+        article = _article(canonical_url=None)
+
+        original_insert = repo.insert_by_content_hash
+
+        def insert_with_concurrent_writer_landing_first(article, content_hash):
+            # Simulate another process's insert completing between this
+            # request's pre-check and its own transactional insert.
+            repo.by_hash[content_hash] = "article-from-concurrent-writer"
+            return original_insert(article, content_hash)
+
+        repo.insert_by_content_hash = insert_with_concurrent_writer_landing_first
+
+        article_id = uc.process(article, symbol="AAPL")
+
+        assert article_id == "article-from-concurrent-writer"
+        assert embedder.embed_calls == 1  # still computed once (pre-check found nothing)
+        assert len(writer.writes) == 0  # but never written, since it wasn't the winning insert

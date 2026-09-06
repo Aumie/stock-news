@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: dataen
+      POSTGRES_DB: stock-news
     ports:
       - "5432:5432"
     volumes:
@@ -21,7 +21,7 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/dataen
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/stock-news
       LOG_ENV: dev
     depends_on:
       postgres:
@@ -32,14 +32,49 @@ services:
     ports:
       - "8002:8002"
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/dataen
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/stock-news
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET:-dev-secret-change-me}
       LOG_ENV: dev
     depends_on:
       postgres:
         condition: service_healthy
 
-  # auth, poller, ui, daily-batch: added in later milestones (see docs/milestone.md)
+  auth:
+    build: ./services/auth
+    ports:
+      # Bound to loopback only, not 0.0.0.0 — this port has no auth of its own
+      # (ExchangeIdentity trusts whatever google_sub/email the caller sends;
+      # real enforcement is Cloud Run IAM in the target deploy, per api-spec.md).
+      # Publishing it to all interfaces would let anyone on the local network
+      # mint a valid 24h JWT for any user. The UI container reaches it via the
+      # docker-compose network regardless (auth:50051), unaffected by this.
+      - "127.0.0.1:50051:50051"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/stock-news
+      JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET:-dev-secret-change-me}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ui:
+    build: ./services/ui
+    ports:
+      - "8501:8501"
+    environment:
+      AUTH_GRPC_ADDR: auth:50051
+      QUERY_API_URL: http://query-api:8002
+    volumes:
+      # secrets.toml is excluded from the build context (.dockerignore) so real
+      # OAuth credentials never end up baked into an image layer — mounted in
+      # at runtime instead. Needs services/ui/.streamlit/secrets.toml (copy
+      # secrets.toml.example) with real Google OAuth credentials to log in.
+      - ./services/ui/.streamlit/secrets.toml:/app/.streamlit/secrets.toml:ro
+    depends_on:
+      - auth
+      - query-api
+
+  # poller, daily-batch: added in later milestones (see docs/milestone.md)
 
 volumes:
   pgdata:

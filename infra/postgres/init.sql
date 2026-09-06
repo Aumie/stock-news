@@ -27,8 +27,15 @@ CREATE TABLE articles (
     -- headline + source + published_at rounded to the minute, NEVER ingested_at
     -- (docs/decision_log.md, "Deduplication")
     content_hash TEXT UNIQUE,
-    canonical_url TEXT UNIQUE
+    canonical_url TEXT UNIQUE,
+    -- Computed once in Python (domain/dedup.py's normalize_headline) at insert
+    -- time and matched exactly here — never re-derived with a second, separate
+    -- SQL-side regex, which previously diverged from the Python normalization
+    -- on non-ASCII headlines (decision_log_claude.md).
+    normalized_headline TEXT NOT NULL
 );
+
+CREATE INDEX articles_fuzzy_match_idx ON articles (published_at, normalized_headline);
 
 CREATE TABLE article_symbols (
     article_id UUID NOT NULL REFERENCES articles(id),

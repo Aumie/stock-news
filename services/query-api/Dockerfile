@@ -9,6 +9,9 @@ RUN uv sync --frozen --no-dev
 
 COPY . .
 
+RUN useradd --create-home --shell /bin/false appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8002
 
 CMD ["uv", "run", "uvicorn", "presentation.api:app", "--host", "0.0.0.0", "--port", "8002"]

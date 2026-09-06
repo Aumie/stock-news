@@ -5,6 +5,36 @@ from typing import Protocol
 from domain.article import Article
 
 
+class UnitOfWork(Protocol):
+    """One atomic transaction spanning article-insert, symbol-link, and
+    embedding-write — closes the gap where a crash between separate commits
+    leaves an article that exists but has no embeddings, permanently
+    invisible to retrieval with no error raised (decision_log_claude.md).
+    Embeddings must already be computed before entering this context: holding
+    a DB transaction open across a slow external embed call would be its own
+    anti-pattern (connection pool exhaustion under load).
+    """
+
+    def __enter__(self) -> "UnitOfWork": ...
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None: ...
+
+    repo: "ArticleRepository"
+    embedding_writer: "EmbeddingWriter"
+
+
+class DedupPrecheck(Protocol):
+    def find_existing(self, article: Article) -> str | None:
+        """Read-only pre-check: does an article matching any tier already
+        exist? Used to skip embedding entirely for an already-known article,
+        without inserting or opening a write transaction. Best-effort only —
+        the atomic insert_by_* calls made inside the actual transaction are
+        still the source of truth for tiers 1-2 (a concurrent insert can land
+        between this check and the transaction; that race is closed by the
+        transaction's own ON CONFLICT DO UPDATE ... RETURNING, not by this).
+        """
+        ...
+
+
 class ArticleRepository(Protocol):
     def insert_by_canonical_url(self, article: Article) -> tuple[str, bool]:
         """Insert on canonical_url conflict-do-nothing. Returns (article_id, inserted)."""
@@ -41,3 +71,7 @@ class Embedder(Protocol):
 
 class Chunker(Protocol):
     def chunk(self, text: str) -> list[str]: ...
+
+
+class UnitOfWorkFactory(Protocol):
+    def __call__(self) -> UnitOfWork: ...

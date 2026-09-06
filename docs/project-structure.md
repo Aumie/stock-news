@@ -67,6 +67,10 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │
 │   ├── ui/                        # Python (Streamlit) — no Clean Architecture, it's a thin presentation shell
 │   │   ├── app.py                 # st.login(), chat interface (st.chat_message/st.chat_input/st.write_stream)
+│   │   ├── auth/v1/               # generated grpc stubs (auth_pb2.py, auth_pb2_grpc.py) from auth's .proto — MUST live
+│   │   │                          # here at the import root, not nested under clients/ (decision_log_claude.md: the
+│   │   │                          # generated _grpc.py always does `from auth.v1 import auth_pb2`, an absolute import
+│   │   │                          # matching the .proto's package path regardless of --python_out)
 │   │   ├── pages/
 │   │   │   ├── watchlist.py       # watchlist management view (§4.5)
 │   │   │   ├── live_feed.py
@@ -74,6 +78,8 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   ├── clients/
 │   │   │   ├── auth_client.py     # gRPC call to Auth, explicit ID-token fetch (§6)
 │   │   │   └── query_api_client.py # HTTPS call to Query API, explicit ID-token fetch (§6)
+│   │   ├── .streamlit/
+│   │   │   └── secrets.toml.example  # template for real Google OAuth credentials (gitignored once filled in)
 │   │   ├── pyproject.toml
 │   │   └── Dockerfile
 │   │

@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "stock-news/auth/proto/auth/v1;authv1";
+
+service AuthService {
+  // Exchanges a Google-verified identity (from the UI's st.login()) for the app's JWT.
+  // Creates the user record on first login (§3), looks it up on subsequent calls.
+  rpc ExchangeIdentity(ExchangeIdentityRequest) returns (ExchangeIdentityResponse);
+}
+
+message ExchangeIdentityRequest {
+  string google_sub = 1;   // already verified by st.login() before this call is made
+  string email = 2;
+}
+
+message ExchangeIdentityResponse {
+  string jwt = 1;
+  int64 expires_at_unix = 2;   // 24h from issuance, §3
+}

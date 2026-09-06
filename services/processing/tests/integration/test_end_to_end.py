@@ -18,12 +18,12 @@ from sqlalchemy import create_engine, text
 from application.process_article import ProcessArticleUseCase
 from domain.article import Article
 from infrastructure.chunking import FixedSizeChunker
-from infrastructure.embedding_writer import PostgresEmbeddingWriter
+from infrastructure.dedup_precheck import PostgresDedupPrecheck
 from infrastructure.embeddings import SentenceTransformerEmbedder
-from infrastructure.postgres_repo import PostgresArticleRepository
+from infrastructure.unit_of_work import PostgresUnitOfWork
 
 DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/dataen"
+    "TEST_DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/stock-news"
 )
 
 
@@ -50,10 +50,10 @@ def embedder():
 @pytest.fixture(scope="module")
 def use_case(engine, embedder):
     return ProcessArticleUseCase(
-        repo=PostgresArticleRepository(engine),
+        uow_factory=lambda: PostgresUnitOfWork(engine),
+        dedup_precheck=PostgresDedupPrecheck(engine),
         chunker=FixedSizeChunker(),
         embedder=embedder,
-        embedding_writer=PostgresEmbeddingWriter(engine),
     )
 
 

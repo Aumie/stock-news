@@ -20,7 +20,7 @@ from application.query_service import QueryService
 from infrastructure.pgvector_search import PgVectorRetriever
 
 DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/dataen"
+    "TEST_DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/stock-news"
 )
 
 
@@ -60,14 +60,20 @@ def seeded_article(engine, embedder):
         conn.execute(
             text(
                 """
-                INSERT INTO articles (id, source, headline, published_at, canonical_url)
-                VALUES (:id, 'finnhub', 'Apple unveils new iPhone', :published_at, :url)
+                INSERT INTO articles (id, source, headline, published_at, canonical_url, normalized_headline)
+                VALUES (:id, 'finnhub', 'Apple unveils new iPhone', :published_at, :url, :normalized_headline)
                 """
             ),
             {
                 "id": article_id,
                 "published_at": datetime(2026, 9, 4, 14, 30, tzinfo=timezone.utc),
                 "url": f"https://example.com/{article_id}",
+                # NOT NULL since processing's normalize_headline() populates it
+                # at insert time in the real pipeline; this test seeds the row
+                # directly, so it fills the column itself rather than
+                # depending on processing's domain module across the service
+                # boundary. Not exercised for fuzzy matching here.
+                "normalized_headline": "apple unveils new iphone",
             },
         )
         conn.execute(

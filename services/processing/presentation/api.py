@@ -6,12 +6,12 @@ from sqlalchemy import create_engine
 
 from application.process_article import ProcessArticleUseCase
 from infrastructure.chunking import FixedSizeChunker
-from infrastructure.embedding_writer import PostgresEmbeddingWriter
+from infrastructure.dedup_precheck import PostgresDedupPrecheck
 from infrastructure.embeddings import SentenceTransformerEmbedder
 from infrastructure.logging import configure_logging
-from infrastructure.postgres_repo import PostgresArticleRepository
 from infrastructure.pubsub import PubSubPushEnvelope, parse_push_envelope
 from infrastructure.settings import Settings
+from infrastructure.unit_of_work import PostgresUnitOfWork
 
 settings = Settings()
 configure_logging(settings.log_env)
@@ -21,10 +21,10 @@ app = FastAPI(title="processing")
 
 _engine = create_engine(settings.database_url)
 _use_case = ProcessArticleUseCase(
-    repo=PostgresArticleRepository(_engine),
+    uow_factory=lambda: PostgresUnitOfWork(_engine),
+    dedup_precheck=PostgresDedupPrecheck(_engine),
     chunker=FixedSizeChunker(),
     embedder=SentenceTransformerEmbedder(settings.embedding_model),
-    embedding_writer=PostgresEmbeddingWriter(_engine),
 )
 
 

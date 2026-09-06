@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 2 (Auth) — next up
+**Current milestone:** 3 (Dynamic symbol coverage) — next up
 
 ---
 
@@ -17,13 +17,17 @@ Static ingestion of a fixed symbol list (unstructured news) → embed → query,
 - [x] Local pgvector via docker-compose
 - [x] End-to-end check: ingest a few articles → embed → ask a question → get a grounded answer (LLM stubbed by default for local/cost-sensitive dev — see `decision_log_claude.md`; retrieval and grounding verified for real against live Postgres/pgvector)
 
-## 2. Auth
+## 2. Auth — done
 Google OAuth2 login, user + watchlist tables.
 
-- [ ] Auth service (Go + gRPC) — `ExchangeIdentity` RPC, JWT issuance (`api-spec.md`)
-- [ ] `users` + `watchlist` tables (`er-diagram.md`)
-- [ ] Streamlit `st.login()` integration
-- [ ] JWT verification in Query API (local, no call-back to Auth)
+- [x] Auth service (Go + gRPC) — `ExchangeIdentity` RPC, JWT issuance (`api-spec.md`) — verified live: real gRPC calls against a running container, real Postgres inserts/lookups, correct `INVALID_ARGUMENT` on bad input
+- [x] `users` + `watchlist` tables (`er-diagram.md`) — already existed from milestone 1's `init.sql`
+- [x] Streamlit `st.login()` integration — verified live with real Google Cloud Console OAuth credentials: clicking "Log in with Google" correctly redirects to Google's real sign-in page. Full round-trip (completing sign-in → callback → UI exchanging identity with Auth) is the user's own action, not automated here (`decision_log_claude.md`)
+- [x] JWT verification in Query API (local, no call-back to Auth) — verified live end-to-end: a JWT issued by the real Auth container is accepted by Query API's `/query`, a missing/garbage token gets a real `401`, no call back to Auth involved
+
+## Known follow-up from milestone 2
+
+- `/query`'s `symbols` field (milestone 1's temporary shape, api-spec.md) still hasn't been replaced by server-side watchlist-scoped retrieval — that needs a watchlist repository query keyed on the JWT's user id, which is separate functionality from "verify a JWT" and wasn't in milestone 2's checklist. Deliberately deferred, not forgotten — see `api-spec.md`'s note.
 
 ## 3. Dynamic symbol coverage
 Poller re-reads distinct watched symbols each cycle and adjusts its polling set automatically.
