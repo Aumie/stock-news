@@ -1,6 +1,26 @@
 name: stock-news
 
 services:
+  pubsub-emulator:
+    # Google's real Pub/Sub emulator — the actual Pub/Sub API/client contract,
+    # including real push subscriptions (HTTP POST to a given endpoint), not a
+    # stand-in that needs bridging. Replaces an earlier Redis Streams + relay
+    # design specifically to avoid needing any bridge at all — Processing's
+    # /pubsub/push endpoint is called directly by the emulator, exactly as
+    # real Pub/Sub will at the milestone 7 cloud migration (decision_log.md's
+    # "Local queue" entry). Uses the JSON config file, not PUBSUB_PROJECT1 env
+    # vars — this image's env-var config only supports pull subscriptions.
+    image: thekevjames/gcloud-pubsub-emulator:latest
+    environment:
+      PUBSUBC_CONFIG: /etc/pubsubc/config.json
+    volumes:
+      - ./infra/pubsub-emulator/config.json:/etc/pubsubc/config.json:ro
+    ports:
+      - "127.0.0.1:8681:8681"
+    depends_on:
+      processing:
+        condition: service_started
+
   postgres:
     image: pgvector/pgvector:pg16
     environment:
@@ -82,12 +102,16 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/stock-news
-      PROCESSING_URL: http://processing:8001
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8681
+      PUBSUB_PROJECT_ID: stock-news-local
+      PUBSUB_TOPIC_ID: articles
       FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
       MARKETAUX_API_KEY: ${MARKETAUX_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
+      pubsub-emulator:
+        condition: service_started
 
   poller-scheduler:
     # Cloud Scheduler's every-minute HTTP trigger has no free local

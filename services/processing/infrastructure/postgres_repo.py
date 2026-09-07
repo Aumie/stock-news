@@ -59,11 +59,14 @@ class PostgresArticleRepository:
         ).fetchone()
         return str(row[0]), bool(row[1])
 
-    def find_by_fuzzy_key(self, fuzzy_key: str) -> str | None:
+    def find_by_fuzzy_key(self, fuzzy_key: str, exclude_article_id: str) -> str | None:
         # normalized_headline is an exact match against the column populated
         # at insert time by the same normalize_headline() used to build this
         # key — no second, SQL-side normalization to keep in sync (see the
-        # column comment in infra/postgres/init.sql).
+        # column comment in infra/postgres/init.sql). exclude_article_id
+        # matters: this is called right after inserting the row being
+        # checked, so without excluding it, the row always matches itself
+        # (decision_log_claude.md — a real bug found via live verification).
         published_date, _, normalized_headline = fuzzy_key.partition("|")
         row = self._conn.execute(
             text(
@@ -71,10 +74,15 @@ class PostgresArticleRepository:
                 SELECT id FROM articles
                 WHERE published_at::date = CAST(:published_date AS date)
                   AND normalized_headline = :normalized_headline
+                  AND id != CAST(:exclude_article_id AS uuid)
                 LIMIT 1
                 """
             ),
-            {"published_date": published_date, "normalized_headline": normalized_headline},
+            {
+                "published_date": published_date,
+                "normalized_headline": normalized_headline,
+                "exclude_article_id": exclude_article_id,
+            },
         ).fetchone()
         return str(row[0]) if row is not None else None
 

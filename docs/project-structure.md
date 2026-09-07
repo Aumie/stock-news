@@ -1,6 +1,6 @@
 # Project structure
 
-Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo build, and Terraform/CI already assume one repo (§10). Reflects the microservices-from-the-start decision (no monolith phase, `decision_log.md`) and the per-language architecture split (Clean Architecture for Python, Go-idiomatic package-per-feature for Go — `decision_log.md`).
+Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo build, and Terraform/CI already assume one repo (§10). Reflects the microservices-from-the-start decision (no monolith phase, `decision_log.md`) and the per-language architecture split (Clean Architecture for Python, Go-idiomatic package-per-feature for Go — `decision_log.md`). Local dev also runs the real GCP Pub/Sub emulator (`docker-compose.yml`, `infra/pubsub-emulator/`) ahead of the milestone 7 cloud migration — no extra bridging service needed, since the emulator supports genuine push subscriptions and calls Processing's `/pubsub/push` directly (decision_log.md's "Local queue, corrected" entry). An earlier Redis Streams + relay design was tried and fully replaced; nothing from it remains in this repo.
 
 ```
 .
@@ -28,10 +28,11 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   │       ├── finnhub.go           # Finnhub client — no dedup_key.go: dedup itself lives in Processing (Python), poller only tags symbol+timestamp on publish
 │   │   │       ├── marketaux.go         # Marketaux client (overflow lane) — batched at 50 symbols/call, verified live (milestone.md §3)
 │   │   │       ├── postgres.go          # watchlist read (aggregates watcher count + earliest added_at per symbol)
-│   │   │       ├── processing_client.go # publishes to Processing's /pubsub/push directly — stand-in for the real queue until milestone 4
+│   │   │       ├── pubsub_publisher.go  # PubSubPublisher (cloud.google.com/go/pubsub/v2) — the real Publisher used in main.go; PUBSUB_EMULATOR_HOST redirects it locally, no code branching (decision_log_claude.md)
+│   │   │       ├── processing_client.go # publishes to Processing's /pubsub/push directly — milestone 1-3's stand-in, kept (tested, unused in main.go) as a reference for the pre-queue approach
 │   │   │       ├── cycle.go             # RunCycle: one poll cycle's orchestration (read watchlist -> assign sources -> poll -> publish)
 │   │   │       └── http.go              # the /trigger handler Cloud Scheduler calls
-│   │   ├── tests/integration/     # live-Postgres/live-Processing checks (docker compose up postgres processing)
+│   │   ├── tests/integration/     # live-Postgres/live-Pub-Sub-emulator/live-Processing checks (docker compose up postgres pubsub-emulator processing)
 │   │   ├── go.mod
 │   │   └── Dockerfile
 │   │
@@ -105,13 +106,16 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │       ├── pyproject.toml
 │       └── Dockerfile
 │
-├── infra/                          # Terraform (§10.5)
+├── infra/
+│   ├── postgres/init.sql            # schema, applied by docker-compose on first Postgres start (built)
+│   ├── pubsub-emulator/config.json  # topic + push subscription config for the local emulator (built, decision_log.md)
+│   │                                 # --- Terraform below is planned for milestone 7, not yet built ---
 │   ├── main.tf
 │   ├── cloud_run.tf                 # 5 services + 1 job, request-only CPU / min-instances=0 defaults left alone (§8)
 │   ├── iam.tf                       # per-service roles/run.invoker bindings (§6, §10.5) — the ingress matrix
 │   ├── secrets.tf                   # secret *containers* + IAM only, never values (§10.5)
 │   ├── scheduler.tf                 # poller (every minute) + daily batch (once daily) triggers
-│   ├── pubsub.tf                    # topic + push subscription (not pull, §6)
+│   ├── pubsub.tf                    # real GCP topic + push subscription (not pull, §6) — replaces the local emulator's config.json at cloud migration
 │   └── workload_identity.tf         # WIF trust, scoped to main (§10.4)
 │
 ├── docs/

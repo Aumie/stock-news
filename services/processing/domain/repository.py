@@ -36,16 +36,23 @@ class DedupPrecheck(Protocol):
 
 
 class ArticleRepository(Protocol):
+    def find_by_fuzzy_key(self, fuzzy_key: str, exclude_article_id: str) -> str | None:
+        """Return an existing article_id matching tier-3's fuzzy key, if any
+        — other than exclude_article_id itself. Excluding self matters
+        because this is called right after inserting the row being checked
+        (its own normalized_headline/published_at already satisfy the fuzzy
+        match), so without excluding it, every article would "find" itself
+        and be wrongly treated as a pre-existing duplicate of itself
+        (decision_log_claude.md — a real bug found via live verification).
+        """
+        ...
+
     def insert_by_canonical_url(self, article: Article) -> tuple[str, bool]:
         """Insert on canonical_url conflict-do-nothing. Returns (article_id, inserted)."""
         ...
 
     def insert_by_content_hash(self, article: Article, content_hash: str) -> tuple[str, bool]:
         """Insert on content_hash conflict-do-nothing. Returns (article_id, inserted)."""
-        ...
-
-    def find_by_fuzzy_key(self, fuzzy_key: str) -> str | None:
-        """Return an existing article_id matching tier-3's fuzzy key, if any."""
         ...
 
     def register_fuzzy_key(self, article_id: str, fuzzy_key: str) -> None:

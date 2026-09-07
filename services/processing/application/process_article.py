@@ -55,7 +55,7 @@ class ProcessArticleUseCase:
             return article_id, False
 
         key = fuzzy_key(article)
-        existing_id = repo.find_by_fuzzy_key(key)
+        existing_id = repo.find_by_fuzzy_key(key, exclude_article_id=article_id)
         if existing_id is not None:
             return existing_id, False
 

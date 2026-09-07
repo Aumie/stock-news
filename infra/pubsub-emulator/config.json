@@ -1,0 +1,14 @@
+[
+  {
+    "project": "stock-news-local",
+    "topic": "articles",
+    "subscriptions": [
+      {
+        "name": "articles-push-processing",
+        "push_config": {
+          "push_endpoint": "http://processing:8001/pubsub/push"
+        }
+      }
+    ]
+  }
+]

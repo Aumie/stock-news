@@ -8,10 +8,20 @@ from domain.dedup import content_hash, fuzzy_key
 
 
 class FakeRepo:
+    """Models a single shared "articles" table, like real Postgres — a row
+    inserted by insert_by_content_hash is immediately visible to
+    find_by_fuzzy_key (same row, same normalized_headline/published_at),
+    NOT a separate registration step. Modeling these as independent dicts
+    previously hid a real bug: find_by_fuzzy_key matched a row against
+    itself right after insert, marking every new article a "duplicate"
+    (decision_log_claude.md — found via live verification, not by this
+    fixture, which is exactly the problem this fixture design fixes).
+    """
+
     def __init__(self):
         self.by_url: dict[str, str] = {}
         self.by_hash: dict[str, str] = {}
-        self.by_fuzzy: dict[str, str] = {}
+        self.rows: dict[str, tuple[str, str]] = {}  # article_id -> (fuzzy_key, ...)
         self.symbols: set[tuple[str, str]] = set()
         self._next_id = 0
 
@@ -24,6 +34,7 @@ class FakeRepo:
             return self.by_url[article.canonical_url], False
         article_id = self._new_id()
         self.by_url[article.canonical_url] = article_id
+        self.rows[article_id] = fuzzy_key(article)
         return article_id, True
 
     def insert_by_content_hash(self, article, content_hash):
@@ -31,13 +42,17 @@ class FakeRepo:
             return self.by_hash[content_hash], False
         article_id = self._new_id()
         self.by_hash[content_hash] = article_id
+        self.rows[article_id] = fuzzy_key(article)
         return article_id, True
 
     def register_fuzzy_key(self, article_id, fuzzy_key):
-        self.by_fuzzy.setdefault(fuzzy_key, article_id)
+        pass  # no-op here too, matching PostgresArticleRepository — see its own comment
 
-    def find_by_fuzzy_key(self, fuzzy_key):
-        return self.by_fuzzy.get(fuzzy_key)
+    def find_by_fuzzy_key(self, fuzzy_key, exclude_article_id):
+        for article_id, key in self.rows.items():
+            if article_id != exclude_article_id and key == fuzzy_key:
+                return article_id
+        return None
 
     def add_symbol(self, article_id, symbol):
         self.symbols.add((article_id, symbol))
@@ -59,7 +74,11 @@ class FakeDedupPrecheck:
         if existing is not None:
             return existing
 
-        return self._repo.by_fuzzy.get(fuzzy_key(article))
+        key = fuzzy_key(article)
+        for article_id, row_key in self._repo.rows.items():
+            if row_key == key:
+                return article_id
+        return None
 
 
 class FakeChunker:
@@ -156,6 +175,22 @@ class TestTier1CanonicalUrl:
 
 
 class TestTier2ContentHash:
+    def test_brand_new_article_with_no_url_still_gets_embedded(self, use_case):
+        # Regression guard: find_by_fuzzy_key must exclude the article's own
+        # just-inserted row, or every URL-less article "matches itself" via
+        # tier 3 and never gets embedded at all — a real, previously-shipped
+        # bug that only affects the no-canonical-url path (canonical-url
+        # articles never call find_by_fuzzy_key), found via live verification
+        # against real Postgres, not by any unit test at the time
+        # (decision_log_claude.md).
+        uc, repo, embedder, writer = use_case
+        article = _article(canonical_url=None, headline="A genuinely unique headline no one else has")
+
+        uc.process(article, symbol="AAPL")
+
+        assert embedder.embed_calls == 1
+        assert len(writer.writes) == 1
+
     def test_same_hash_no_url_is_not_reembedded(self, use_case):
         uc, repo, embedder, writer = use_case
         a = _article(canonical_url=None, published_at=datetime(2026, 9, 4, 14, 30, 0))

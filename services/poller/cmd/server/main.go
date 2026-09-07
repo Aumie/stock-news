@@ -19,7 +19,8 @@ func main() {
 	finnhubToken := os.Getenv("FINNHUB_API_KEY")
 	marketauxBaseURL := envOrDefault("MARKETAUX_BASE_URL", "https://api.marketaux.com")
 	marketauxToken := os.Getenv("MARKETAUX_API_KEY")
-	processingURL := envOrDefault("PROCESSING_URL", "http://localhost:8001")
+	pubsubProjectID := envOrDefault("PUBSUB_PROJECT_ID", "stock-news-local")
+	pubsubTopicID := envOrDefault("PUBSUB_TOPIC_ID", "articles")
 	port := envOrDefault("PORT", "8080")
 	finnhubCap := envOrDefaultInt("FINNHUB_SYMBOL_CAP", 45)
 
@@ -38,10 +39,17 @@ func main() {
 	}
 	defer pool.Close()
 
+	ctx := context.Background()
+	pubsubPublisher, err := pollerpkg.NewPubSubPublisher(ctx, pubsubProjectID, pubsubTopicID)
+	if err != nil {
+		log.Fatalf("failed to create pubsub publisher: %v", err)
+	}
+	defer pubsubPublisher.Close()
+
 	deps := pollerpkg.Deps{
 		Watchlist:  pollerpkg.NewPostgresWatchlistReader(pool),
 		Finnhub:    pollerpkg.NewFinnhubClient(finnhubBaseURL, finnhubToken),
-		Publisher:  pollerpkg.NewProcessingClient(processingURL),
+		Publisher:  pubsubPublisher,
 		FinnhubCap: finnhubCap,
 	}
 	if marketauxToken != "" {

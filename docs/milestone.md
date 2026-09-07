@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 4 (Microservices split — MVP checkpoint) — next up
+**Current milestone:** 5 (Structured pipeline & feature store) — next up
 
 ---
 
@@ -36,15 +36,17 @@ Poller re-reads distinct watched symbols each cycle and adjusts its polling set 
 - [x] Marketaux client (overflow lane) — built and verified live once a key was provided: a real batched call to `api.marketaux.com/v1/news/all` correctly authenticated, parsed real articles (including non-ASCII headlines), and correctly extracted per-article matched symbols from `entities` (a response can include entities beyond the queried symbols — confirmed live, filtered out in `cycle.go` so untracked tickers never get ingested)
 - [x] **Live check before building overflow logic further**: Marketaux's per-request symbol limit and reset-boundary behavior (§4.2) — **done**. Real finding: the spec's conservative 20-symbols/call assumption was far more cautious than necessary — a real request with 98 symbols succeeded fully with no error, though the actual ceiling (if any) above that wasn't found. Batch size raised to 50/call (user's explicit choice, moderate increase with headroom below the untested boundary — see `cadence.go`, `decision_log_claude.md`). Reset-boundary behavior remains **genuinely undocumented and unconfirmed** even after the live check (no reset-timestamp header exists in Marketaux's response) — this can only be resolved by watching the quota counter reset over real wall-clock time or contacting Marketaux support, not from a single call
 - [x] Cloud Scheduler trigger design validated locally (simple interval loop stands in for it in docker-compose) — verified live: the `poller-scheduler` sidecar fires a real `POST /trigger` every 60s, confirmed repeating, poller correctly processes each real cycle and returns `200`
-- **Full pipeline verified live end-to-end with both real sources**: a real overflow scenario (Finnhub cap forced to 0) correctly routed a watched symbol to Marketaux, fetched real articles, and published them through the complete real pipeline (dedup → embed → Postgres) — this incidentally exercises milestone 4's "cross-source dedup actually exercised" scenario in terms of both sources genuinely producing real ingested articles, though a same-story-via-both-sources dedup collision wasn't specifically engineered/observed yet
+- **Full pipeline verified live end-to-end with both real sources**: a real overflow scenario (Finnhub cap forced to 0) correctly routed a watched symbol to Marketaux, fetched real articles, and published them through the complete real pipeline (dedup → embed → Postgres). The deliberate same-story-via-both-sources dedup collision is exercised properly under milestone 4, below.
 
-## 4. Microservices split — MVP checkpoint
+## 4. Microservices split — MVP checkpoint — done
 Separate poller, processing, and query services communicating via queue.
 
-- [ ] Pub/Sub (or local equivalent) wiring, poller → processing
-- [ ] Three-tier dedup implemented (`content_hash` on `published_at`, `canonical_url`, fuzzy headline) + DB constraints
-- [ ] Cross-source dedup actually exercised (same story via Finnhub and Marketaux)
-- [ ] **MVP checkpoint reached** — this is the honest "few weeks" target (§2); if time runs out anywhere, this is where it's still fair to call it done
+- [x] Pub/Sub (or local equivalent) wiring, poller → processing — initially built with Redis Streams + a small bridging relay service, then **corrected to the real GCP Pub/Sub emulator** once the user asked whether any local option supported genuine push delivery like real Pub/Sub (`decision_log.md`'s "Local queue, corrected" entry). The emulator speaks the actual Pub/Sub client/server contract, including real push subscriptions — it calls Processing's unchanged `/pubsub/push` endpoint directly, with no bridging service of any kind. Verified live multiple times, including a real Finnhub poll cycle publishing 15 articles that were pushed by the emulator itself (confirmed via the emulator's own container IP in Processing's access logs) straight through to Postgres, and an automated integration test (`services/poller/internal/poller/pubsub_publisher_test.go`) against the real emulator
+- [x] Three-tier dedup implemented (`content_hash` on `published_at`, `canonical_url`, fuzzy headline) + DB constraints — built in milestone 1, DB constraints hardened during the smell audit (`ON CONFLICT DO UPDATE ... RETURNING`, verified against a real 10-thread concurrent-write test)
+- [x] Cross-source dedup actually exercised (same story via Finnhub and Marketaux) — deliberately engineered live test: two crafted articles (same real-world story, different headline punctuation/case, no canonical URL, ~45s apart) published as `finnhub` then `marketaux` through the real pipeline correctly collapsed to exactly one `articles` row, one `article_symbols` link, and (see below) one real embedding
+- [x] **MVP checkpoint reached** — milestones 1-4 are done and verified against real infrastructure throughout, matching the spec's own honest "few weeks" target (§2)
+
+**Major bug found and fixed during this milestone's own verification, not before**: the deliberate cross-source dedup test above first surfaced that `find_by_fuzzy_key` matched a newly-inserted article against itself, silently discarding embeddings for every article without a `canonical_url` (introduced by the earlier smell-audit fix #6, caught within the same working session — no real ingested data was lost, see `decision_log_claude.md` for the full trace and blast-radius check). Fixed, covered by a new regression test that's confirmed to fail without the fix, and reverified live: the same cross-source scenario now correctly produces a real embedding.
 
 ## 5. Structured pipeline & feature store
 Cloud Scheduler + Cloud Run batch job pulls daily closing price/volume; dbt model into `daily_symbol_features`; complex-SQL stats queries.
