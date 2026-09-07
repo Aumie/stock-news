@@ -26,3 +26,9 @@ class PriceDelta:
     date: date
     price_close: float
     price_change_pct: float | None
+
+
+@dataclass(frozen=True)
+class OverviewStats:
+    articles_ingested_today: int
+    tickers_tracked: int

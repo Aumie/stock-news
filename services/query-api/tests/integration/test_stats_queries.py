@@ -14,7 +14,8 @@ Requires a running Postgres from `docker compose up postgres`.
 from __future__ import annotations
 
 import os
-from datetime import date
+import uuid
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -111,3 +112,52 @@ def test_price_deltas(engine, seeded):
     assert len(deltas) == 5
     assert deltas[0].price_change_pct is None
     assert deltas[1].price_change_pct == pytest.approx(2.0)
+
+
+@pytest.fixture
+def seeded_articles(engine):
+    now = datetime.now(timezone.utc)
+    ids = []
+    for headline, symbol, published_at, ingested_at in [
+        ("today AAPL 1", "AAPL", now - timedelta(hours=1), now - timedelta(hours=1)),
+        ("today AAPL 2", "AAPL", now - timedelta(hours=2), now - timedelta(hours=2)),
+        ("yesterday AAPL", "AAPL", now - timedelta(days=1, hours=1), now - timedelta(days=1, hours=1)),
+        ("today MSFT unwatched", "MSFT", now - timedelta(hours=1), now - timedelta(hours=1)),
+    ]:
+        article_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO articles (id, source, headline, published_at, ingested_at, canonical_url, normalized_headline)
+                    VALUES (CAST(:id AS uuid), 'finnhub', :headline, :published_at, :ingested_at, :url, :normalized)
+                    """
+                ),
+                {
+                    "id": article_id,
+                    "headline": headline,
+                    "published_at": published_at,
+                    "ingested_at": ingested_at,
+                    "url": f"https://example.com/{article_id}",
+                    "normalized": headline.lower(),
+                },
+            )
+            conn.execute(
+                text("INSERT INTO article_symbols (article_id, symbol) VALUES (CAST(:id AS uuid), :symbol)"),
+                {"id": article_id, "symbol": symbol},
+            )
+        ids.append(article_id)
+    yield ids
+    with engine.begin() as conn:
+        for article_id in ids:
+            conn.execute(text("DELETE FROM article_symbols WHERE article_id = CAST(:id AS uuid)"), {"id": article_id})
+            conn.execute(text("DELETE FROM articles WHERE id = CAST(:id AS uuid)"), {"id": article_id})
+
+
+def test_overview_stats_scoped_to_watched_symbols(engine, seeded_articles):
+    stats = StatsQueries(engine)
+
+    overview = stats.overview_stats(["AAPL"])
+
+    assert overview.articles_ingested_today == 2  # the two today-AAPL articles, not the MSFT one or yesterday's
+    assert overview.tickers_tracked == 1

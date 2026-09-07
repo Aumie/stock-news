@@ -10,3 +10,8 @@ dependencies = [
     "protobuf>=7.36.2",
     "streamlit[auth]>=1.64.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

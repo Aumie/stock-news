@@ -24,14 +24,14 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x61uth/v1/auth.proto\x12\x07\x61uth.v1\"<\n\x17\x45xchangeIdentityRequest\x12\x12\n\ngoogle_sub\x18\x01 \x01(\t\x12\r\n\x05\x65mail\x18\x02 \x01(\t\"@\n\x18\x45xchangeIdentityResponse\x12\x0b\n\x03jwt\x18\x01 \x01(\t\x12\x17\n\x0f\x65xpires_at_unix\x18\x02 \x01(\x03\x32\x66\n\x0b\x41uthService\x12W\n\x10\x45xchangeIdentity\x12 .auth.v1.ExchangeIdentityRequest\x1a!.auth.v1.ExchangeIdentityResponseB\"Z stock-news/auth/proto/auth/v1;authv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12\x61uth/v1/auth.proto\x12\x07\x61uth.v1\"<\n\x17\x45xchangeIdentityRequest\x12\x12\n\ngoogle_sub\x18\x01 \x01(\t\x12\r\n\x05\x65mail\x18\x02 \x01(\t\"@\n\x18\x45xchangeIdentityResponse\x12\x0b\n\x03jwt\x18\x01 \x01(\t\x12\x17\n\x0f\x65xpires_at_unix\x18\x02 \x01(\x03\x32\x66\n\x0b\x41uthService\x12W\n\x10\x45xchangeIdentity\x12 .auth.v1.ExchangeIdentityRequest\x1a!.auth.v1.ExchangeIdentityResponseB&Z$stock-news/auth/proto/auth/v1;authv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'auth.v1.auth_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z stock-news/auth/proto/auth/v1;authv1'
+  _globals['DESCRIPTOR']._serialized_options = b'Z$stock-news/auth/proto/auth/v1;authv1'
   _globals['_EXCHANGEIDENTITYREQUEST']._serialized_start=31
   _globals['_EXCHANGEIDENTITYREQUEST']._serialized_end=91
   _globals['_EXCHANGEIDENTITYRESPONSE']._serialized_start=93

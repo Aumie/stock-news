@@ -62,38 +62,67 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │
 │   ├── query-api/                 # Python — lighter Clean Architecture (thin in v1, §8)
 │   │   ├── domain/
-│   │   │   ├── retrieval.py       # RetrievedChunk entity; symbol-validation domain logic (§4.1) not yet built — watchlist endpoint is deferred (milestone.md)
-│   │   │   └── stats.py           # RollingVolumePoint/IngestionLagStats/PriceDelta entities (§4.6, milestone 5)
+│   │   │   ├── retrieval.py       # RetrievedChunk entity
+│   │   │   ├── stats.py           # RollingVolumePoint/IngestionLagStats/PriceDelta/OverviewStats entities (§4.6, milestones 5-6)
+│   │   │   ├── watchlist.py       # WatchlistEntry entity (§4.1, milestone 6)
+│   │   │   └── feed.py            # FeedItem entity (§4.5, milestone 6)
 │   │   ├── application/
-│   │   │   └── query_service.py   # retrieval + LLM call/streaming (§4.4); grows into full layering in v2 once tool-routing lands (§12.3). No watchlist_service.py yet — watchlist endpoint deferred (milestone.md's "Known follow-up")
+│   │   │   ├── query_service.py   # retrieval + LLM call/streaming (§4.4); grows into full layering in v2 once tool-routing lands (§12.3)
+│   │   │   └── watchlist_service.py # add/list/remove, Finnhub validation before persisting (§4.1, milestone 6)
 │   │   ├── infrastructure/
 │   │   │   ├── pgvector_search.py
-│   │   │   ├── stats_queries.py   # real window-function SQL against daily_symbol_features (§4.6, milestone 5) — rolling 7-day volume, ingestion-lag percentiles, day-over-day price deltas. Not yet wired to an HTTP endpoint — that's milestone 6's stats UI
+│   │   │   ├── stats_queries.py   # real window-function SQL against daily_symbol_features (§4.6, milestone 5) — rolling 7-day volume, ingestion-lag percentiles, day-over-day price deltas, plus overview_stats() (real-time articles-today/tickers-tracked against articles/article_symbols directly, milestone 6)
+│   │   │   ├── feed_queries.py    # recent articles scoped to watched symbols, most recent first (§4.5, milestone 6)
+│   │   │   ├── finnhub_lookup.py  # FinnhubSymbolLookup — exact-match validation against /search, rejecting fuzzy cross-exchange matches (§4.1, milestone 6)
+│   │   │   ├── postgres_watchlist_repo.py # idempotent add (ON CONFLICT DO UPDATE), scoped list/remove (milestone 6)
 │   │   │   ├── llm_client.py      # streaming LLM call + spend-ceiling handling (§4.4)
 │   │   │   ├── stub_llm.py        # StubLLMClient — zero-cost local/demo fallback when ANTHROPIC_API_KEY isn't set (decision_log_claude.md)
 │   │   │   ├── jwt_verify.py      # local JWT verification, no call back to Auth (§6)
 │   │   │   ├── settings.py        # env/config loading
 │   │   │   └── logging.py         # structlog wiring
-│   │   │                          # No postgres_repo.py / finnhub_lookup.py yet — both belong to the not-yet-built watchlist endpoint
 │   │   ├── presentation/
-│   │   │   ├── api.py             # FastAPI app — /health, /query only; /watchlist not yet built (api-spec.md, milestone.md)
+│   │   │   ├── api.py             # FastAPI app — wires all routers below plus /health
+│   │   │   ├── query_api.py       # /query — symbols now derived from the caller's watchlist, not the request body (milestone 6, api-spec.md)
+│   │   │   ├── watchlist_api.py   # GET/POST /watchlist, DELETE /watchlist/{symbol} (milestone 6)
+│   │   │   ├── feed_api.py        # GET /feed (milestone 6)
+│   │   │   ├── stats_api.py       # GET /stats — overview + per-symbol breakdown (milestone 6)
 │   │   │   └── auth_dependency.py # require_auth() — Bearer-token FastAPI dependency wrapping jwt_verify
 │   │   ├── pyproject.toml
 │   │   └── Dockerfile
 │   │
 │   ├── ui/                        # Python (Streamlit) — no Clean Architecture, it's a thin presentation shell
-│   │   ├── app.py                 # st.login(), chat interface (st.chat_message/st.chat_input/st.write_stream)
+│   │   ├── app.py                 # st.login() gate, then st.navigation(build_pages()) — page construction lives in
+│   │   │                          # views/navigation.py so it's testable independent of the login gate (see tests/)
 │   │   ├── auth/v1/               # generated grpc stubs (auth_pb2.py, auth_pb2_grpc.py) from auth's .proto — MUST live
 │   │   │                          # here at the import root, not nested under clients/ (decision_log_claude.md: the
 │   │   │                          # generated _grpc.py always does `from auth.v1 import auth_pb2`, an absolute import
-│   │   │                          # matching the .proto's package path regardless of --python_out)
-│   │   ├── pages/
-│   │   │   ├── watchlist.py       # watchlist management view (§4.5)
-│   │   │   ├── live_feed.py
-│   │   │   └── stats.py           # stats + cost-monitoring dashboard, one surface not two (§4.6)
+│   │   │                          # matching the .proto's package path regardless of --python_out). Regenerated in
+│   │   │                          # milestone 6 after a stale descriptor (wrong length-prefix byte from an older
+│   │   │                          # protoc run) failed to parse under the current pinned protobuf version.
+│   │   ├── views/                 # NOT named `pages/` — Streamlit auto-discovers any folder literally named `pages/`
+│   │   │   │                      # as legacy multipage navigation regardless of st.navigation(), which bypassed
+│   │   │   │                      # app.py's login gate entirely (confirmed live, decision_log_claude.md). Each
+│   │   │   │                      # module exposes a render() function app.py wires into st.Page().
+│   │   │   ├── navigation.py      # build_pages() — every view's entry point is named `render`, so each st.Page()
+│   │   │   │                      # needs an explicit, distinct url_path or they collide (confirmed live: a real
+│   │   │   │                      # StreamlitAPIException in production, decision_log_claude.md). Extracted from
+│   │   │   │                      # app.py so it's callable/testable without a real login (see tests/test_navigation.py)
+│   │   │   ├── query_panel.py     # chat interface (st.chat_message/st.chat_input/st.write_stream)
+│   │   │   ├── watchlist.py       # watchlist management view (§4.5) — inline 422 error surfaced on rejection
+│   │   │   ├── live_feed.py       # live ingestion feed (§4.5)
+│   │   │   └── stats.py           # stats + cost-monitoring dashboard, one surface not two (§4.6) — cost-monitoring
+│   │   │                          # section is an explicit "not available locally" note, not faked data (real
+│   │   │                          # BigQuery INFORMATION_SCHEMA.JOBS/GCS/Pub-Sub wiring is milestone 7's job)
+│   │   ├── tests/
+│   │   │   └── test_navigation.py # uses streamlit.testing.v1.AppTest, not a plain unit test — st.navigation()'s
+│   │   │                          # pathname-collision check only runs inside a real Streamlit script-run context,
+│   │   │                          # confirmed a bare `python` script does not raise even with the buggy code
 │   │   ├── clients/
 │   │   │   ├── auth_client.py     # gRPC call to Auth, explicit ID-token fetch (§6)
-│   │   │   └── query_api_client.py # HTTPS call to Query API, explicit ID-token fetch (§6)
+│   │   │   ├── query_api_client.py # HTTPS call to Query API, explicit ID-token fetch (§6)
+│   │   │   ├── watchlist_client.py # GET/POST/DELETE /watchlist (milestone 6)
+│   │   │   ├── feed_client.py     # GET /feed (milestone 6)
+│   │   │   └── stats_client.py    # GET /stats (milestone 6)
 │   │   ├── .streamlit/
 │   │   │   └── secrets.toml.example  # template for real Google OAuth credentials (gitignored once filled in)
 │   │   ├── pyproject.toml

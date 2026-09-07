@@ -82,9 +82,21 @@ All endpoints require `Authorization: Bearer <jwt>`, verified locally against th
 |---|---|---|---|---|
 | `POST` | `/query` | `{ "question": "..." }` | **Streaming** (`StreamingResponse`, chunked, not buffered JSON — §4.4) — token-by-token LLM output, terminated by a final sentinel chunk | Guardrail: if retrieval is empty, the stream's content is an explicit "no news on that" answer, not silence or a generic error (§4.4). If the LLM spend ceiling is hit, the stream instead emits the honest "spending cap reached" message (§4.4) |
 
-**Milestone 1/2 shape, temporary**: `/query`'s request body also carries `{ "symbols": [...] }` explicitly, since there's no JWT-derived watchlist yet to scope retrieval by (`docs/milestone.md` §1 — "no auth yet"). Milestone 2 adds JWT verification (`Authorization: Bearer <jwt>` is now required and validated locally, per §6 below) but does **not** yet wire watchlist-scoped retrieval — that requires a watchlist repository query keyed on the authenticated user, which is separate functionality from "verify a JWT" and is scoped to a later milestone's watchlist-management work instead. This field drops only once that watchlist lookup lands, matching the shape above exactly.
+**Resolved as of milestone 6**: `/query`'s request body carried an explicit `{ "symbols": [...] }` field through milestones 1-5, since there was no JWT-derived watchlist yet to scope retrieval by. Milestone 6 wires the watchlist repository lookup keyed on the JWT's `sub` (the authenticated user), so `symbols` is now derived server-side from the caller's own watchlist and the request body no longer accepts or needs it — the shape above (`{ "question": "..." }` only) is the current, permanent shape, not a placeholder.
 
 - **Cost note**: this is the one endpoint where public exposure would matter more than anywhere else in the system — each hit can trigger a real LLM API call (§6). The IAM lockdown above is the only thing preventing that from being attacker-controlled.
+
+### Live ingestion feed (§4.5, milestone 6)
+
+| Method | Path | Request | Response | Notes |
+|---|---|---|---|---|
+| `GET` | `/feed` | — | `[{ "article_id", "source", "headline", "symbols": [...], "published_at", "ingested_at" }, ...]` | scoped to the caller's watchlist, most recently ingested first |
+
+### Stats & cost-monitoring (§4.6, milestone 6)
+
+| Method | Path | Request | Response | Notes |
+|---|---|---|---|---|
+| `GET` | `/stats` | — | `{ "overview": { "articles_ingested_today", "tickers_tracked" }, "by_symbol": { "<SYMBOL>": { "rolling_volume": [...], "ingestion_lag": {...}, "price_deltas": [...] } } }` | scoped to the caller's watchlist; per-symbol figures read `daily_symbol_features` (milestone 5). Cloud cost monitoring (BigQuery `INFORMATION_SCHEMA.JOBS`, GCS/Pub-Sub usage, §4.6) has no local equivalent and isn't in this response — shown as an explicit "not available locally" note on the UI's Stats page instead of faked data, real wiring is milestone 7's cloud migration |
 
 ---
 

@@ -14,4 +14,5 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "claude-haiku-4-5-20251001"
     jwt_signing_secret: str = DEFAULT_JWT_SIGNING_SECRET
+    finnhub_api_key: str = ""
     log_env: str = "dev"

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-from domain.stats import IngestionLagStats, PriceDelta, RollingVolumePoint
+from domain.stats import IngestionLagStats, OverviewStats, PriceDelta, RollingVolumePoint
 
 
 class StatsQueries:
@@ -11,12 +11,23 @@ class StatsQueries:
     the feature-store-lite table dbt materializes daily. Deliberately
     non-trivial SQL per docs/stock-news-digest-requirements.md §4.6: window
     functions, not flat COUNT/GROUP BY.
+
+    The table doesn't exist until the daily-batch job has run at least once
+    (true for any fresh deployment) — every method degrades to an empty/zero
+    result in that case instead of raising, since "no data yet" is a normal
+    state here, not an error (a real 500 was caught live during milestone 6's
+    verification, see docs/decision_log_claude.md).
     """
 
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
+    def _table_exists(self) -> bool:
+        return inspect(self._engine).has_table("daily_symbol_features")
+
     def rolling_article_volume(self, symbol: str) -> list[RollingVolumePoint]:
+        if not self._table_exists():
+            return []
         with self._engine.begin() as conn:
             rows = conn.execute(
                 text(
@@ -46,6 +57,8 @@ class StatsQueries:
         ]
 
     def ingestion_lag_stats(self, symbol: str) -> IngestionLagStats:
+        if not self._table_exists():
+            return IngestionLagStats(symbol=symbol, avg_lag_seconds=0.0, p50_lag_seconds=0.0, p95_lag_seconds=0.0)
         with self._engine.begin() as conn:
             row = conn.execute(
                 text(
@@ -68,6 +81,8 @@ class StatsQueries:
         )
 
     def price_deltas(self, symbol: str) -> list[PriceDelta]:
+        if not self._table_exists():
+            return []
         with self._engine.begin() as conn:
             rows = conn.execute(
                 text(
@@ -89,3 +104,26 @@ class StatsQueries:
             )
             for row in rows
         ]
+
+    def overview_stats(self, symbols: list[str]) -> OverviewStats:
+        # Real-time counts against `articles`/`article_symbols` directly —
+        # deliberately not from daily_symbol_features, which only updates
+        # once a day (§4.6) and would make "articles ingested today" stale
+        # until the next batch run.
+        if not symbols:
+            return OverviewStats(articles_ingested_today=0, tickers_tracked=0)
+
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(DISTINCT a.id) AS articles_today
+                    FROM articles a
+                    JOIN article_symbols s ON s.article_id = a.id
+                    WHERE s.symbol = ANY(:symbols)
+                      AND a.ingested_at >= date_trunc('day', now())
+                    """
+                ),
+                {"symbols": symbols},
+            ).fetchone()
+        return OverviewStats(articles_ingested_today=row.articles_today, tickers_tracked=len(symbols))

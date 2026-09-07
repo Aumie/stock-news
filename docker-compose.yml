@@ -57,6 +57,7 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/stock-news
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET:-dev-secret-change-me}
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
       LOG_ENV: dev
     depends_on:
       postgres:
