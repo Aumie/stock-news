@@ -23,45 +23,58 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   ├── cmd/server/main.go
 │   │   ├── internal/
 │   │   │   └── poller/
-│   │   │       ├── overflow.go    # overflow-assignment ranking rule (§4.2) — pure, no I/O, TDD target
-│   │   │       ├── cadence.go     # cadence-scaling formula (§4.2) — pure, TDD target
-│   │   │       ├── dedup_key.go   # NOTE: dedup logic itself lives in Processing (Python); poller only tags symbol+timestamp on publish
-│   │   │       ├── finnhub.go     # Finnhub client
-│   │   │       ├── marketaux.go   # Marketaux client
-│   │   │       ├── postgres.go    # watchlist read
-│   │   │       └── http.go        # the /trigger handler Cloud Scheduler calls
+│   │   │       ├── overflow.go          # overflow-assignment ranking rule (§4.2) — pure, no I/O, TDD target
+│   │   │       ├── cadence.go           # cadence-scaling formula (§4.2) — pure, TDD target
+│   │   │       ├── finnhub.go           # Finnhub client — no dedup_key.go: dedup itself lives in Processing (Python), poller only tags symbol+timestamp on publish
+│   │   │       ├── marketaux.go         # Marketaux client (overflow lane) — batched at 50 symbols/call, verified live (milestone.md §3)
+│   │   │       ├── postgres.go          # watchlist read (aggregates watcher count + earliest added_at per symbol)
+│   │   │       ├── processing_client.go # publishes to Processing's /pubsub/push directly — stand-in for the real queue until milestone 4
+│   │   │       ├── cycle.go             # RunCycle: one poll cycle's orchestration (read watchlist -> assign sources -> poll -> publish)
+│   │   │       └── http.go              # the /trigger handler Cloud Scheduler calls
+│   │   ├── tests/integration/     # live-Postgres/live-Processing checks (docker compose up postgres processing)
 │   │   ├── go.mod
 │   │   └── Dockerfile
 │   │
 │   ├── processing/                # Python — full Clean Architecture layering (real domain logic, §8)
 │   │   ├── domain/
 │   │   │   ├── article.py         # entities — Article, ArticleSymbol
-│   │   │   └── dedup.py           # the three-tier dedup priority (§4.3) — pure, no DB/HTTP, the main TDD target here
+│   │   │   ├── dedup.py           # the three-tier dedup priority (§4.3) — pure, no DB/HTTP, the main TDD target here
+│   │   │   └── repository.py      # Protocol interfaces (ArticleRepository, UnitOfWork, Embedder, Chunker, ...) — defined in domain/, implemented in infrastructure/
 │   │   ├── application/
 │   │   │   └── process_article.py # use case: consume -> dedup -> chunk -> embed -> persist, orchestrates domain + infra interfaces
 │   │   ├── infrastructure/
-│   │   │   ├── postgres_repo.py   # implements the repository interface application/ defines
-│   │   │   ├── embeddings.py      # sentence-transformers (or API) adapter
-│   │   │   └── pubsub.py          # push-subscription payload parsing
+│   │   │   ├── postgres_repo.py   # implements ArticleRepository — atomic ON CONFLICT ... DO UPDATE ... RETURNING upserts (decision_log_claude.md)
+│   │   │   ├── unit_of_work.py    # PostgresUnitOfWork — one transaction spanning insert + symbol-link + embedding-write (decision_log_claude.md)
+│   │   │   ├── dedup_precheck.py  # read-only pre-check to skip embedding an already-known article before opening a transaction
+│   │   │   ├── embedding_writer.py # implements EmbeddingWriter — ON CONFLICT (article_id, chunk_index) DO NOTHING
+│   │   │   ├── embeddings.py      # sentence-transformers (all-MiniLM-L6-v2) adapter
+│   │   │   ├── chunking.py        # text chunker
+│   │   │   ├── pubsub.py          # push-subscription payload parsing
+│   │   │   ├── settings.py        # env/config loading
+│   │   │   └── logging.py         # structlog wiring
 │   │   ├── presentation/
 │   │   │   └── api.py             # FastAPI app, POST /pubsub/push (api-spec.md)
+│   │   ├── scripts/
+│   │   │   └── seed_static_articles.py  # milestone 1 stand-in for the real poller (local/demo seeding)
 │   │   ├── pyproject.toml
 │   │   └── Dockerfile
 │   │
 │   ├── query-api/                 # Python — lighter Clean Architecture (thin in v1, §8)
 │   │   ├── domain/
-│   │   │   └── watchlist.py       # symbol validation rule (§4.1) — the one piece of real domain logic here
+│   │   │   └── retrieval.py       # RetrievedChunk entity; symbol-validation domain logic (§4.1) not yet built — watchlist endpoint is deferred (milestone.md)
 │   │   ├── application/
-│   │   │   ├── watchlist_service.py
-│   │   │   └── query_service.py   # retrieval + LLM call/streaming (§4.4); grows into full layering in v2 once tool-routing lands (§12.3)
+│   │   │   └── query_service.py   # retrieval + LLM call/streaming (§4.4); grows into full layering in v2 once tool-routing lands (§12.3). No watchlist_service.py yet — watchlist endpoint deferred (milestone.md's "Known follow-up")
 │   │   ├── infrastructure/
-│   │   │   ├── postgres_repo.py
 │   │   │   ├── pgvector_search.py
-│   │   │   ├── finnhub_lookup.py  # symbol validation's external call
 │   │   │   ├── llm_client.py      # streaming LLM call + spend-ceiling handling (§4.4)
-│   │   │   └── jwt_verify.py      # local JWT verification, no call back to Auth (§6)
+│   │   │   ├── stub_llm.py        # StubLLMClient — zero-cost local/demo fallback when ANTHROPIC_API_KEY isn't set (decision_log_claude.md)
+│   │   │   ├── jwt_verify.py      # local JWT verification, no call back to Auth (§6)
+│   │   │   ├── settings.py        # env/config loading
+│   │   │   └── logging.py         # structlog wiring
+│   │   │                          # No postgres_repo.py / finnhub_lookup.py yet — both belong to the not-yet-built watchlist endpoint
 │   │   ├── presentation/
-│   │   │   └── api.py             # FastAPI app — /watchlist, /query (api-spec.md)
+│   │   │   ├── api.py             # FastAPI app — /health, /query only; /watchlist not yet built (api-spec.md, milestone.md)
+│   │   │   └── auth_dependency.py # require_auth() — Bearer-token FastAPI dependency wrapping jwt_verify
 │   │   ├── pyproject.toml
 │   │   └── Dockerfile
 │   │

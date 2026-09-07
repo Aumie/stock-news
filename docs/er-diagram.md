@@ -31,6 +31,7 @@ erDiagram
         timestamp ingested_at
         string content_hash UK "headline+source+published_at(min), NEVER ingested_at — see decision_log"
         string canonical_url UK "nullable; UNIQUE when present"
+        string normalized_headline "computed once in Python at insert time, matched by equality — not re-derived in SQL, see decision_log_claude.md"
     }
 
     article_symbols {
@@ -47,9 +48,10 @@ erDiagram
 ```
 
 **Constraints that matter beyond the shape** (§4.3, §7 — these are why the dedup design actually holds):
-- `articles.content_hash` UNIQUE, `ON CONFLICT DO NOTHING` — closes the within-source race
-- `articles.canonical_url` UNIQUE when present, same conflict handling — closes the cross-source race whenever a source exposes a URL
-- `article_symbols` composite UNIQUE `(article_id, symbol)` — makes the symbol-tagging insert idempotent
+- `articles.content_hash` UNIQUE, `ON CONFLICT (content_hash) DO UPDATE SET content_hash = EXCLUDED.content_hash RETURNING id, (xmax = 0) AS inserted` — one atomic round trip, not a separate `DO NOTHING` + follow-up `SELECT`, since that left a real gap where a concurrent insert landing between the two statements could make the `SELECT` return zero rows (found and fixed during implementation, `decision_log_claude.md`)
+- `articles.canonical_url` UNIQUE when present, same `DO UPDATE ... RETURNING` pattern — closes the cross-source race whenever a source exposes a URL
+- `articles_fuzzy_match_idx` on `(published_at, normalized_headline)` — backs tier 3's lookup; `normalized_headline` is computed once in Python and matched by plain equality, deliberately not re-derived with a second SQL-side regex (an earlier version did, and diverged from the Python normalization on non-ASCII headlines — `decision_log_claude.md`)
+- `article_symbols` composite UNIQUE `(article_id, symbol)`, `ON CONFLICT DO NOTHING` — makes the symbol-tagging insert idempotent; this one genuinely is `DO NOTHING`, since there's nothing to update on a repeat tag
 - `article_symbols` is deliberately many-to-many — one article can legitimately cover multiple tickers (sector news, or discovered via polling two different symbols)
 - The one case with no hard constraint: cross-source matching via fuzzy-matched headline when no URL exists (§4.3's tier 3) — accepted, low-frequency edge case, not enforced at the DB level
 

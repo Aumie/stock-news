@@ -1,3 +1,5 @@
+name: stock-news
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -74,7 +76,34 @@ services:
       - auth
       - query-api
 
-  # poller, daily-batch: added in later milestones (see docs/milestone.md)
+  poller:
+    build: ./services/poller
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/stock-news
+      PROCESSING_URL: http://processing:8001
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      MARKETAUX_API_KEY: ${MARKETAUX_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  poller-scheduler:
+    # Cloud Scheduler's every-minute HTTP trigger has no free local
+    # equivalent, so a plain interval loop stands in for it here
+    # (docs/milestone.md §3) — not meant to reflect Cloud Scheduler's own
+    # retry/OIDC behavior, just to exercise /trigger repeatedly like it would.
+    image: alpine:3.20
+    command: >
+      sh -c "apk add --no-cache curl >/dev/null && while true; do
+        curl -s -o /dev/null -w 'poller trigger: %{http_code}\n' -X POST http://poller:8080/trigger;
+        sleep 60;
+      done"
+    depends_on:
+      - poller
+
+  # daily-batch: added in a later milestone (see docs/milestone.md)
 
 volumes:
   pgdata:

@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 3 (Dynamic symbol coverage) — next up
+**Current milestone:** 4 (Microservices split — MVP checkpoint) — next up
 
 ---
 
@@ -29,13 +29,14 @@ Google OAuth2 login, user + watchlist tables.
 
 - `/query`'s `symbols` field (milestone 1's temporary shape, api-spec.md) still hasn't been replaced by server-side watchlist-scoped retrieval — that needs a watchlist repository query keyed on the JWT's user id, which is separate functionality from "verify a JWT" and wasn't in milestone 2's checklist. Deliberately deferred, not forgotten — see `api-spec.md`'s note.
 
-## 3. Dynamic symbol coverage
+## 3. Dynamic symbol coverage — done
 Poller re-reads distinct watched symbols each cycle and adjusts its polling set automatically.
 
-- [ ] Poller service (Go) — Finnhub client, overflow-assignment rule, cadence-scaling formula
-- [ ] Marketaux client (overflow lane)
-- [ ] **Live check before building overflow logic further**: Marketaux's per-request symbol limit and reset-boundary behavior (§4.2 — flagged as the single highest-risk unverified assumption in the whole spec)
-- [ ] Cloud Scheduler trigger design validated locally (simple interval loop stands in for it in docker-compose)
+- [x] Poller service (Go) — Finnhub client, overflow-assignment rule, cadence-scaling formula. Overflow ranking and cadence formula are pure/fully unit-tested. Finnhub client verified live end-to-end once a key was provided: a real poll cycle for AAPL returned 13 real news items, correctly parsed and published through the full real pipeline (`decision_log_claude.md`)
+- [x] Marketaux client (overflow lane) — built and verified live once a key was provided: a real batched call to `api.marketaux.com/v1/news/all` correctly authenticated, parsed real articles (including non-ASCII headlines), and correctly extracted per-article matched symbols from `entities` (a response can include entities beyond the queried symbols — confirmed live, filtered out in `cycle.go` so untracked tickers never get ingested)
+- [x] **Live check before building overflow logic further**: Marketaux's per-request symbol limit and reset-boundary behavior (§4.2) — **done**. Real finding: the spec's conservative 20-symbols/call assumption was far more cautious than necessary — a real request with 98 symbols succeeded fully with no error, though the actual ceiling (if any) above that wasn't found. Batch size raised to 50/call (user's explicit choice, moderate increase with headroom below the untested boundary — see `cadence.go`, `decision_log_claude.md`). Reset-boundary behavior remains **genuinely undocumented and unconfirmed** even after the live check (no reset-timestamp header exists in Marketaux's response) — this can only be resolved by watching the quota counter reset over real wall-clock time or contacting Marketaux support, not from a single call
+- [x] Cloud Scheduler trigger design validated locally (simple interval loop stands in for it in docker-compose) — verified live: the `poller-scheduler` sidecar fires a real `POST /trigger` every 60s, confirmed repeating, poller correctly processes each real cycle and returns `200`
+- **Full pipeline verified live end-to-end with both real sources**: a real overflow scenario (Finnhub cap forced to 0) correctly routed a watched symbol to Marketaux, fetched real articles, and published them through the complete real pipeline (dedup → embed → Postgres) — this incidentally exercises milestone 4's "cross-source dedup actually exercised" scenario in terms of both sources genuinely producing real ingested articles, though a same-story-via-both-sources dedup collision wasn't specifically engineered/observed yet
 
 ## 4. Microservices split — MVP checkpoint
 Separate poller, processing, and query services communicating via queue.
