@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 5 (Structured pipeline & feature store) — next up
+**Current milestone:** 6 (UI) — next up
 
 ---
 
@@ -48,13 +48,14 @@ Separate poller, processing, and query services communicating via queue.
 
 **Major bug found and fixed during this milestone's own verification, not before**: the deliberate cross-source dedup test above first surfaced that `find_by_fuzzy_key` matched a newly-inserted article against itself, silently discarding embeddings for every article without a `canonical_url` (introduced by the earlier smell-audit fix #6, caught within the same working session — no real ingested data was lost, see `decision_log_claude.md` for the full trace and blast-radius check). Fixed, covered by a new regression test that's confirmed to fail without the fix, and reverified live: the same cross-source scenario now correctly produces a real embedding.
 
-## 5. Structured pipeline & feature store
+## 5. Structured pipeline & feature store — done
 Cloud Scheduler + Cloud Run batch job pulls daily closing price/volume; dbt model into `daily_symbol_features`; complex-SQL stats queries.
 
-- [ ] Daily batch job (Python + dbt), Cloud Run Job shape
-- [ ] `prices` table (append-only, no rolling deletion)
-- [ ] `daily_symbol_features` dbt model — materialized as a table, date grain is the union of `prices` dates and article-activity dates
-- [ ] Complex-SQL stats queries (window functions — rolling volume, ingestion-lag percentiles, day-over-day deltas)
+- [x] Daily batch job (`services/daily-batch`, Python) — Cloud Run Job shape: a one-shot `docker compose --profile batch run --rm daily-batch`, not a long-running service, matching the spec's once-daily cadence (§4.6). Reads distinct watched symbols from `watchlist`, pulls OHLCV, upserts `prices`, then shells out to real `dbt run` + `dbt test`. Verified live end-to-end inside its actual container: a real Yahoo Finance fetch, a real Postgres write, a real dbt run producing `daily_symbol_features`, all 4 dbt tests passing, container exiting cleanly
+- [x] **Live check surfaced a real spec-breaking finding**: Finnhub's candle endpoint (the spec's original OHLCV source) returned a real `403` — it's now Premium-gated, confirmed against the docs and a live call with the project's own key. Stooq (the first free alternative tried) is now blocked by a JS proof-of-work anti-bot challenge, unusable from a server-side job without scripted evasion. **Corrected to Yahoo Finance's chart API** (no key, verified live with a plain browser `User-Agent`) — see `decision_log.md`'s "Data & storage" section and the spec's own §4.6/§8 correction notes
+- [x] `prices` table (`infra/postgres/init.sql`) — append-only in spirit (no deletion path exists), `(symbol, date)` primary key makes a same-day re-run idempotent (upsert, not insert-only) rather than erroring or duplicating on retry
+- [x] `daily_symbol_features` dbt model (`services/daily-batch/dbt/models/daily_symbol_features.sql`) — materialized as a table, date grain is a real `UNION` of `prices` dates and article-activity dates (via `article_symbols`), verified live: a test article inserted on a date with no matching `prices` row produced a real row with `article_count=1`, `avg_ingestion_lag_seconds` correctly computed, and null price columns — exactly the spec'd non-join behavior, not gated on a price existing. `price_change_pct` computed via a real dbt `LAG()` window function, verified against 5 real trading days of live-fetched AAPL data. Two dbt schema tests (not-null) plus one singular composite-uniqueness test on `(symbol, date)`, all passing live
+- [x] Complex-SQL stats queries (`services/query-api/infrastructure/stats_queries.py`) — three real window-function queries against `daily_symbol_features`, verified live against real Postgres: `rolling_article_volume` (`AVG() OVER (... ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)`), `ingestion_lag_stats` (`PERCENTILE_CONT` for p50/p95), `price_deltas` (reads the dbt-computed day-over-day `LAG()` column). Built in query-api (not daily-batch) since it's a read path the stats UI will call — wiring an actual `/stats` HTTP endpoint around these is milestone 6's job (`docs/milestone.md` §6), this milestone's scope was the SQL itself existing and being demonstrably correct
 
 ## 6. UI
 Query panel, digest view, live ingestion feed, stats.

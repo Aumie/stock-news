@@ -62,11 +62,13 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │
 │   ├── query-api/                 # Python — lighter Clean Architecture (thin in v1, §8)
 │   │   ├── domain/
-│   │   │   └── retrieval.py       # RetrievedChunk entity; symbol-validation domain logic (§4.1) not yet built — watchlist endpoint is deferred (milestone.md)
+│   │   │   ├── retrieval.py       # RetrievedChunk entity; symbol-validation domain logic (§4.1) not yet built — watchlist endpoint is deferred (milestone.md)
+│   │   │   └── stats.py           # RollingVolumePoint/IngestionLagStats/PriceDelta entities (§4.6, milestone 5)
 │   │   ├── application/
 │   │   │   └── query_service.py   # retrieval + LLM call/streaming (§4.4); grows into full layering in v2 once tool-routing lands (§12.3). No watchlist_service.py yet — watchlist endpoint deferred (milestone.md's "Known follow-up")
 │   │   ├── infrastructure/
 │   │   │   ├── pgvector_search.py
+│   │   │   ├── stats_queries.py   # real window-function SQL against daily_symbol_features (§4.6, milestone 5) — rolling 7-day volume, ingestion-lag percentiles, day-over-day price deltas. Not yet wired to an HTTP endpoint — that's milestone 6's stats UI
 │   │   │   ├── llm_client.py      # streaming LLM call + spend-ceiling handling (§4.4)
 │   │   │   ├── stub_llm.py        # StubLLMClient — zero-cost local/demo fallback when ANTHROPIC_API_KEY isn't set (decision_log_claude.md)
 │   │   │   ├── jwt_verify.py      # local JWT verification, no call back to Auth (§6)
@@ -98,16 +100,27 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   └── Dockerfile
 │   │
 │   └── daily-batch/                # Python (Cloud Run Job) — needs the dbt runtime regardless of language preference (§6)
-│       ├── main.py                # pulls OHLCV, finalizes prices, then shells out to `dbt run`
+│       ├── main.py                # reads watched symbols, pulls OHLCV, upserts prices, then shells out to real `dbt run` + `dbt test`
+│       ├── prices/
+│       │   ├── yahoo_client.py    # Yahoo Finance chart API client — corrected from Finnhub's candle endpoint mid-milestone-5 (decision_log.md: live 403, endpoint now Premium-gated)
+│       │   ├── prices_repo.py     # upsert into `prices`, idempotent on (symbol, date)
+│       │   ├── run_daily_batch.py # orchestration: per-symbol fetch+upsert, isolates one symbol's failure from the rest
+│       │   ├── settings.py        # env/config loading
+│       │   └── logging.py         # structlog wiring
 │       ├── dbt/
 │       │   ├── models/
-│       │   │   └── daily_symbol_features.sql   # materialized: table (§4.6)
-│       │   └── dbt_project.yml
+│       │   │   ├── daily_symbol_features.sql   # materialized: table (§4.6) — date grain is a real UNION of prices dates + article-activity dates
+│       │   │   └── schema.yml     # not-null tests
+│       │   ├── tests/
+│       │   │   └── assert_no_duplicate_symbol_date.sql  # singular composite-uniqueness test (no dbt_utils dependency needed for just this)
+│       │   ├── dbt_project.yml
+│       │   └── profiles.yml       # postgres target locally (decision_log.md's BigQuery-stand-in entry) — credentials via env_var(), nothing hardcoded
+│       ├── tests/                 # unit tests (fake Yahoo client/repo) + tests/integration/ (real Postgres, real live Yahoo Finance call)
 │       ├── pyproject.toml
 │       └── Dockerfile
 │
 ├── infra/
-│   ├── postgres/init.sql            # schema, applied by docker-compose on first Postgres start (built)
+│   ├── postgres/init.sql            # schema, applied by docker-compose on first Postgres start (built) — includes `prices` (milestone 5, local BigQuery stand-in)
 │   ├── pubsub-emulator/config.json  # topic + push subscription config for the local emulator (built, decision_log.md)
 │   │                                 # --- Terraform below is planned for milestone 7, not yet built ---
 │   ├── main.tf

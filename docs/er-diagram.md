@@ -57,6 +57,8 @@ erDiagram
 
 ## BigQuery — v1
 
+Locally, this lives in the same Postgres instance as the tables above (`infra/postgres/init.sql`) — no local BigQuery emulator exists, unlike Pub/Sub (`project-structure.md`); dbt's postgres adapter targets it locally and the real BigQuery adapter after the milestone 7 cloud migration (`decision_log.md`).
+
 ```mermaid
 erDiagram
     prices ||--o{ daily_symbol_features : "aggregated into"

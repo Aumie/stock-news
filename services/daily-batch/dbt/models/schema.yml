@@ -1,0 +1,14 @@
+version: 2
+
+models:
+  - name: daily_symbol_features
+    columns:
+      - name: symbol
+        tests:
+          - not_null
+      - name: date
+        tests:
+          - not_null
+      - name: article_count
+        tests:
+          - not_null

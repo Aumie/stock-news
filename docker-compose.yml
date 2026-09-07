@@ -127,7 +127,23 @@ services:
     depends_on:
       - poller
 
-  # daily-batch: added in a later milestone (see docs/milestone.md)
+  daily-batch:
+    # Cloud Run *Job* stand-in (§4.6, §6) — one-shot, not an always-on
+    # service, so it's excluded from the default `docker compose up` set via
+    # the "batch" profile; run on demand with
+    # `docker compose run --rm daily-batch` (matches Cloud Scheduler's
+    # once-daily manual-style trigger, not a continuously running container).
+    profiles: ["batch"]
+    build: ./services/daily-batch
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/stock-news
+      DBT_PG_HOST: postgres
+      DBT_PG_USER: postgres
+      DBT_PG_PASSWORD: postgres
+      DBT_PG_DBNAME: stock-news
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -52,3 +52,18 @@ CREATE TABLE embeddings (
 );
 
 CREATE INDEX embeddings_vector_idx ON embeddings USING hnsw (vector vector_cosine_ops);
+
+-- Local stand-in for BigQuery (docs/decision_log.md, "BigQuery for all
+-- structured data" — no local BigQuery emulator exists, unlike Pub/Sub).
+-- dbt targets this table via its postgres adapter locally, BigQuery at the
+-- milestone 7 cloud migration.
+CREATE TABLE prices (
+    symbol TEXT NOT NULL,
+    date DATE NOT NULL,
+    open DOUBLE PRECISION NOT NULL,
+    high DOUBLE PRECISION NOT NULL,
+    low DOUBLE PRECISION NOT NULL,
+    close DOUBLE PRECISION NOT NULL,
+    volume BIGINT NOT NULL,
+    PRIMARY KEY (symbol, date)
+);

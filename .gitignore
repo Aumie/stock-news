@@ -8,6 +8,12 @@ __pycache__/
 # Go
 services/*/tmp/
 
+# dbt
+target/
+logs/
+dbt_packages/
+.user.yml
+
 # Docker
 *.pid
 

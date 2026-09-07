@@ -1,0 +1,13 @@
+name: daily_batch
+version: "1.0.0"
+config-version: 2
+
+profile: daily_batch
+
+model-paths: ["models"]
+
+models:
+  daily_batch:
+    +materialized: view
+    daily_symbol_features:
+      +materialized: table
