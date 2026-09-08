@@ -52,6 +52,13 @@ def embedder():
 
 @pytest.fixture(scope="module")
 def seeded_article(engine, embedder):
+    # Seeded under a made-up symbol (TESTSYM), not a real ticker like AAPL —
+    # a real bug found live: the live poller continuously ingests real AAPL
+    # articles in the background during dev, so a top_k=5 retrieval test
+    # asserting this exact seeded article surfaces is flaky by construction
+    # once enough real AAPL content accumulates to outcompete it
+    # (decision_log_claude.md — same root cause already fixed once in
+    # test_stats_queries.py's overview_stats test).
     article_id = str(uuid.uuid4())
     chunk_text = "Apple announced its latest iPhone with new on-device AI features."
     vector = embedder.encode(chunk_text, convert_to_numpy=True).tolist()
@@ -77,7 +84,7 @@ def seeded_article(engine, embedder):
             },
         )
         conn.execute(
-            text("INSERT INTO article_symbols (article_id, symbol) VALUES (:id, 'AAPL')"),
+            text("INSERT INTO article_symbols (article_id, symbol) VALUES (:id, 'TESTSYM')"),
             {"id": article_id},
         )
         conn.execute(
@@ -97,7 +104,7 @@ def test_query_service_returns_grounded_answer_from_real_retrieval(engine, embed
     llm = StubLLM()
     service = QueryService(retriever=retriever, llm=llm)
 
-    output = "".join(service.answer(symbols=["AAPL"], question="What did Apple announce?"))
+    output = "".join(service.answer(symbols=["TESTSYM"], question="What did Apple announce?"))
 
     assert "iPhone" in output
     assert "on-device AI features" in llm.last_prompt
@@ -108,6 +115,6 @@ def test_query_service_guardrail_when_symbol_has_no_articles(engine, embedder, s
     llm = StubLLM()
     service = QueryService(retriever=retriever, llm=llm)
 
-    output = "".join(service.answer(symbols=["TSLA"], question="What's new?"))
+    output = "".join(service.answer(symbols=["TESTSYM2"], question="What's new?"))
 
     assert "news" in output.lower()

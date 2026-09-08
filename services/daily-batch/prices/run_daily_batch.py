@@ -28,11 +28,12 @@ def run_daily_batch(
     symbols: list[str],
     yahoo_client: YahooClientProtocol,
     prices_repo: PricesRepoProtocol,
+    range_: str = "5d",
 ) -> BatchResult:
     result = BatchResult()
     for symbol in symbols:
         try:
-            bars = yahoo_client.fetch_daily_bars(symbol)
+            bars = yahoo_client.fetch_daily_bars(symbol, range_=range_)
         except NoDataError:
             # One symbol's data being unavailable (delisted, typo, Yahoo
             # coverage gap) shouldn't block every other watched symbol's

@@ -67,3 +67,13 @@ CREATE TABLE prices (
     volume BIGINT NOT NULL,
     PRIMARY KEY (symbol, date)
 );
+
+-- News backfill progress on watchlist-add, symbol-scoped not per-user
+-- (matches §4.2's "shared, not duplicated" philosophy already used for the
+-- v2 OHLCV backfill design, decision_log.md). earliest_backfilled_date is
+-- the oldest date already fetched from Finnhub for this symbol; each
+-- "load more" click extends the range backward from there.
+CREATE TABLE symbol_backfill_progress (
+    symbol TEXT PRIMARY KEY,
+    earliest_backfilled_date DATE NOT NULL
+);

@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-from domain.stats import IngestionLagStats, OverviewStats, PriceDelta, RollingVolumePoint
+from domain.stats import OverviewStats, PriceDelta, RollingVolumePoint
 
 
 class StatsQueries:
@@ -25,6 +25,13 @@ class StatsQueries:
     def _table_exists(self) -> bool:
         return inspect(self._engine).has_table("daily_symbol_features")
 
+    # Both 7d and 30d figures are derived from a single 30-day fetch per
+    # symbol (one query each for volume/total/price, not two) — a real
+    # scaling concern the user raised directly: doubling every query per
+    # window would mean 6 queries x N watched symbols per page load instead
+    # of 3, which matters once a watchlist has many symbols even though the
+    # JSON response itself stays small either way (decision_log.md).
+
     def rolling_article_volume(self, symbol: str) -> list[RollingVolumePoint]:
         if not self._table_exists():
             return []
@@ -36,11 +43,14 @@ class StatsQueries:
                         date,
                         article_count,
                         AVG(article_count) OVER (
-                            ORDER BY date
-                            ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
-                        ) AS rolling_7day_avg
+                            ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+                        ) AS rolling_avg_7d,
+                        AVG(article_count) OVER (
+                            ORDER BY date ROWS BETWEEN 29 PRECEDING AND CURRENT ROW
+                        ) AS rolling_avg_30d
                     FROM daily_symbol_features
                     WHERE symbol = :symbol
+                      AND date >= CURRENT_DATE - INTERVAL '30 days'
                     ORDER BY date
                     """
                 ),
@@ -51,36 +61,36 @@ class StatsQueries:
                 symbol=symbol,
                 date=row.date,
                 articles_today=row.article_count,
-                rolling_7day_avg=float(row.rolling_7day_avg),
+                rolling_avg_7d=float(row.rolling_avg_7d),
+                rolling_avg_30d=float(row.rolling_avg_30d),
             )
             for row in rows
         ]
 
-    def ingestion_lag_stats(self, symbol: str) -> IngestionLagStats:
+    def total_ingestion(self, symbol: str) -> tuple[int, int]:
+        """Returns (total_7d, total_30d)."""
         if not self._table_exists():
-            return IngestionLagStats(symbol=symbol, avg_lag_seconds=0.0, p50_lag_seconds=0.0, p95_lag_seconds=0.0)
+            return (0, 0)
         with self._engine.begin() as conn:
             row = conn.execute(
                 text(
                     """
                     SELECT
-                        AVG(avg_ingestion_lag_seconds) AS avg_lag,
-                        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY avg_ingestion_lag_seconds) AS p50_lag,
-                        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY avg_ingestion_lag_seconds) AS p95_lag
+                        COALESCE(SUM(article_count) FILTER (
+                            WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+                        ), 0) AS total_7d,
+                        COALESCE(SUM(article_count), 0) AS total_30d
                     FROM daily_symbol_features
-                    WHERE symbol = :symbol AND avg_ingestion_lag_seconds IS NOT NULL
+                    WHERE symbol = :symbol
+                      AND date >= CURRENT_DATE - INTERVAL '30 days'
                     """
                 ),
                 {"symbol": symbol},
             ).fetchone()
-        return IngestionLagStats(
-            symbol=symbol,
-            avg_lag_seconds=float(row.avg_lag) if row.avg_lag is not None else 0.0,
-            p50_lag_seconds=float(row.p50_lag) if row.p50_lag is not None else 0.0,
-            p95_lag_seconds=float(row.p95_lag) if row.p95_lag is not None else 0.0,
-        )
+        return (int(row.total_7d), int(row.total_30d))
 
     def price_deltas(self, symbol: str) -> list[PriceDelta]:
+        """Returns up to 30 days of deltas; callers wanting the 7d view slice the tail themselves."""
         if not self._table_exists():
             return []
         with self._engine.begin() as conn:
@@ -90,6 +100,7 @@ class StatsQueries:
                     SELECT date, price_close, price_change_pct
                     FROM daily_symbol_features
                     WHERE symbol = :symbol AND price_close IS NOT NULL
+                      AND date >= CURRENT_DATE - INTERVAL '30 days'
                     ORDER BY date
                     """
                 ),

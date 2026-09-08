@@ -22,14 +22,14 @@ class PgVectorRetriever:
             rows = conn.execute(
                 text(
                     """
-                    SELECT DISTINCT ON (e.article_id, e.chunk_index)
+                    SELECT
                         e.article_id, e.chunk_text, a.source, a.headline,
                         1 - (e.vector <=> :query_vector) AS score
                     FROM embeddings e
                     JOIN articles a ON a.id = e.article_id
                     JOIN article_symbols s ON s.article_id = a.id
                     WHERE s.symbol = ANY(:symbols)
-                    ORDER BY e.article_id, e.chunk_index, e.vector <=> :query_vector
+                    ORDER BY e.vector <=> :query_vector
                     LIMIT :top_k
                     """
                 ),

@@ -58,10 +58,30 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       JWT_SIGNING_SECRET: ${JWT_SIGNING_SECRET:-dev-secret-change-me}
       FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      PROCESSING_URL: http://processing:8001
       LOG_ENV: dev
+      # Local-dev only (decision_log.md) — selects LocalDockerJobTrigger,
+      # which shells out to `docker compose -p stock-news ...`. Matches the
+      # `name:` pin at the top of this file. Never set in the cloud image;
+      # the milestone 7 migration wires CloudRunJobTrigger there instead.
+      COMPOSE_PROJECT_NAME: stock-news
+    volumes:
+      # Docker socket, local-dev only — lets query-api shell out to start a
+      # one-off daily-batch run when a symbol is added (LocalDockerJobTrigger).
+      # Socket access is equivalent to host root, so this must never exist in
+      # the cloud image/Terraform config — there, query-api instead calls the
+      # real GCP Cloud Run Jobs API over HTTPS with IAM auth, no socket needed.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # `docker compose run` talks to the socket above (the *host's* daemon),
+      # so it needs the host's compose file + build context on disk to know
+      # what "daily-batch" means — read-only, this container never builds or
+      # writes here, only invokes `docker compose run` against it.
+      - .:/workspace:ro
     depends_on:
       postgres:
         condition: service_healthy
+      processing:
+        condition: service_started
 
   auth:
     build: ./services/auth

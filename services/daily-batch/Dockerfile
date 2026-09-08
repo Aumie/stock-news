@@ -12,4 +12,4 @@ COPY . .
 RUN useradd --create-home --shell /bin/false appuser && chown -R appuser:appuser /app
 USER appuser
 
-CMD ["uv", "run", "python", "main.py"]
+ENTRYPOINT ["uv", "run", "python", "main.py"]

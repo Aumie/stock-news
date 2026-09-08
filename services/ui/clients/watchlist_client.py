@@ -21,7 +21,12 @@ class WatchlistAPIClient:
             f"{self._base_url}/watchlist",
             headers={"Authorization": f"Bearer {jwt}"},
             json={"symbol": symbol},
-            timeout=10.0,
+            # Add triggers a synchronous 30-day news backfill server-side,
+            # fetched as three sequential <=14-day Finnhub calls (a single
+            # 30-day request isn't reliable for a busy symbol, decision_log.md)
+            # — confirmed live at ~9s per chunk, ~30s+ total for a busy
+            # symbol, well past a plain CRUD request's usual budget.
+            timeout=120.0,
         )
         if response.status_code == 422:
             return False, response.json().get("detail", "invalid symbol")

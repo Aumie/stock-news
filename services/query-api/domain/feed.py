@@ -12,3 +12,4 @@ class FeedItem:
     symbols: list[str]
     published_at: datetime
     ingested_at: datetime
+    canonical_url: str | None

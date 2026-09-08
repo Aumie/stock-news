@@ -15,4 +15,9 @@ class Settings(BaseSettings):
     llm_model: str = "claude-haiku-4-5-20251001"
     jwt_signing_secret: str = DEFAULT_JWT_SIGNING_SECRET
     finnhub_api_key: str = ""
+    processing_url: str = "http://localhost:8001"
     log_env: str = "dev"
+    # Local-dev only — selects LocalDockerJobTrigger when set (docker-compose.yml
+    # pins this to "stock-news"). Unset in the cloud image; the milestone 7
+    # migration wires CloudRunJobTrigger there instead (decision_log.md).
+    compose_project_name: str = ""

@@ -42,14 +42,10 @@ def test_rolling_article_volume_is_empty_when_table_missing(engine):
     assert stats.rolling_article_volume("AAPL") == []
 
 
-def test_ingestion_lag_stats_is_zeroed_when_table_missing(engine):
+def test_total_ingestion_is_zero_when_table_missing(engine):
     stats = StatsQueries(engine)
 
-    result = stats.ingestion_lag_stats("AAPL")
-
-    assert result.avg_lag_seconds == 0.0
-    assert result.p50_lag_seconds == 0.0
-    assert result.p95_lag_seconds == 0.0
+    assert stats.total_ingestion("AAPL") == (0, 0)
 
 
 def test_price_deltas_is_empty_when_table_missing(engine):

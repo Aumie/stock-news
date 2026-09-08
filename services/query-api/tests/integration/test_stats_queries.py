@@ -59,52 +59,153 @@ def engine():
 
 @pytest.fixture
 def seeded(engine):
+    today = date.today()
     rows = [
-        ("TESTSYM", date(2026, 9, 14), 2, 30.0, 100.0, 1000, None),
-        ("TESTSYM", date(2026, 9, 15), 1, 45.0, 102.0, 1200, 2.0),
-        ("TESTSYM", date(2026, 9, 16), 5, 60.0, 101.0, 1100, -0.98),
-        ("TESTSYM", date(2026, 9, 17), 0, None, 105.0, 1300, 3.96),
-        ("TESTSYM", date(2026, 9, 18), 3, 15.0, 104.0, 1250, -0.95),
+        (today - timedelta(days=4), 2, 100.0, 1000, None),
+        (today - timedelta(days=3), 1, 102.0, 1200, 2.0),
+        (today - timedelta(days=2), 5, 101.0, 1100, -0.98),
+        (today - timedelta(days=1), 0, 105.0, 1300, 3.96),
+        (today, 3, 104.0, 1250, -0.95),
     ]
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM daily_symbol_features WHERE symbol = 'TESTSYM'"))
-        for symbol, dt, count, lag, close, volume, change in rows:
+        for dt, count, close, volume, change in rows:
             conn.execute(
                 text(
                     """
                     INSERT INTO daily_symbol_features
-                        (symbol, date, article_count, avg_ingestion_lag_seconds, price_close, price_volume, price_change_pct)
-                    VALUES (:symbol, :date, :count, :lag, :close, :volume, :change)
+                        (symbol, date, article_count, price_close, price_volume, price_change_pct)
+                    VALUES ('TESTSYM', :date, :count, :close, :volume, :change)
                     """
                 ),
-                {"symbol": symbol, "date": dt, "count": count, "lag": lag, "close": close, "volume": volume, "change": change},
+                {"date": dt, "count": count, "close": close, "volume": volume, "change": change},
             )
-    yield
+    yield today
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM daily_symbol_features WHERE symbol = 'TESTSYM'"))
 
 
-def test_rolling_7day_article_volume(engine, seeded):
+def test_rolling_article_volume_computes_both_7d_and_30d_averages_in_one_call(engine, seeded):
     stats = StatsQueries(engine)
 
     points = stats.rolling_article_volume("TESTSYM")
 
-    assert [p.date for p in points] == [date(2026, 9, 14 + i) for i in range(5)]
-    # last day's 7-day rolling avg over all 5 seeded days: (2+1+5+0+3)/5 = 2.2
-    assert points[-1].rolling_7day_avg == pytest.approx(2.2)
+    today = seeded
+    assert [p.date for p in points] == [today - timedelta(days=4 - i) for i in range(5)]
+    # last day's rolling avg over all 5 seeded days (all within both windows): (2+1+5+0+3)/5 = 2.2
+    assert points[-1].rolling_avg_7d == pytest.approx(2.2)
+    assert points[-1].rolling_avg_30d == pytest.approx(2.2)
     assert points[-1].articles_today == 3
 
 
-def test_ingestion_lag_stats(engine, seeded):
+def test_rolling_article_volume_7d_and_30d_genuinely_differ_with_older_data(engine, seeded):
+    # Windows are ROWS BETWEEN N PRECEDING (row-count, not calendar-day-range)
+    # — correct as long as daily_symbol_features has no date gaps, which
+    # holds under normal operation (its date grain is a union of prices dates
+    # and article-activity dates, so every day gets a row, decision_log.md).
+    # Filling in the gap days here (not skipping straight to day-10) keeps
+    # this test realistic instead of exercising a gap that can't occur live.
+    stats = StatsQueries(engine)
+    today = seeded
+    with engine.begin() as conn:
+        for days_ago in range(5, 10):
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO daily_symbol_features (symbol, date, article_count)
+                    VALUES ('TESTSYM', :date, 0)
+                    """
+                ),
+                {"date": today - timedelta(days=days_ago)},
+            )
+        conn.execute(
+            text(
+                """
+                INSERT INTO daily_symbol_features (symbol, date, article_count)
+                VALUES ('TESTSYM', :date, 100)
+                """
+            ),
+            {"date": today - timedelta(days=10)},  # the 11th row back — outside a 7-row window, inside a 30-row one
+        )
+
+    points = stats.rolling_article_volume("TESTSYM")
+    last = points[-1]
+
+    # 7-row avg only sees the last 7 rows (today back through day-6) — the day-10 row falls outside it
+    assert last.rolling_avg_7d == pytest.approx(2.2 * 5 / 7)  # (2+1+5+0+3+0+0)/7
+    # 30-row avg includes the day-10 row's 100, pulling the average up substantially
+    assert last.rolling_avg_30d > last.rolling_avg_7d
+
+
+def test_rolling_article_volume_excludes_days_outside_the_30day_fetch(engine, seeded):
+    stats = StatsQueries(engine)
+    today = seeded
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO daily_symbol_features (symbol, date, article_count)
+                VALUES ('TESTSYM', :date, 999)
+                """
+            ),
+            {"date": today - timedelta(days=40)},
+        )
+
+    points = stats.rolling_article_volume("TESTSYM")
+
+    assert all(p.date >= today - timedelta(days=30) for p in points)
+    assert 999 not in [p.articles_today for p in points]
+
+
+def test_total_ingestion_returns_both_7d_and_30d_sums_in_one_call(engine, seeded):
     stats = StatsQueries(engine)
 
-    result = stats.ingestion_lag_stats("TESTSYM")
+    total_7d, total_30d = stats.total_ingestion("TESTSYM")
 
-    assert result.symbol == "TESTSYM"
-    assert result.avg_lag_seconds == pytest.approx(37.5)  # avg of 30, 45, 60, 15 (nulls excluded)
+    assert total_7d == 2 + 1 + 5 + 0 + 3  # all 5 seeded days fall within the last 7
+    assert total_30d == 2 + 1 + 5 + 0 + 3  # same, since nothing seeded is older than 7 days here
 
 
-def test_price_deltas(engine, seeded):
+def test_total_ingestion_7d_excludes_a_day_that_30d_includes(engine, seeded):
+    stats = StatsQueries(engine)
+    today = seeded
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO daily_symbol_features (symbol, date, article_count)
+                VALUES ('TESTSYM', :date, 100)
+                """
+            ),
+            {"date": today - timedelta(days=10)},  # within 30d, outside 7d
+        )
+
+    total_7d, total_30d = stats.total_ingestion("TESTSYM")
+
+    assert total_7d == 2 + 1 + 5 + 0 + 3  # the day-10 row must not be counted here
+    assert total_30d == 2 + 1 + 5 + 0 + 3 + 100  # but must be counted here
+
+
+def test_total_ingestion_excludes_days_outside_the_30day_fetch(engine, seeded):
+    stats = StatsQueries(engine)
+    today = seeded
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO daily_symbol_features (symbol, date, article_count)
+                VALUES ('TESTSYM', :date, 999)
+                """
+            ),
+            {"date": today - timedelta(days=40)},
+        )
+
+    _, total_30d = stats.total_ingestion("TESTSYM")
+
+    assert total_30d == 2 + 1 + 5 + 0 + 3  # the 40-day-old row must not be counted
+
+
+def test_price_deltas_returns_up_to_30_days(engine, seeded):
     stats = StatsQueries(engine)
 
     deltas = stats.price_deltas("TESTSYM")
@@ -116,13 +217,19 @@ def test_price_deltas(engine, seeded):
 
 @pytest.fixture
 def seeded_articles(engine):
+    # Uses made-up symbols (TESTSYM/TESTSYM2), not real tickers like AAPL —
+    # a real bug found live: the live poller continuously ingests real AAPL
+    # articles in the background during dev, so a test asserting an exact
+    # "articles ingested today" count against AAPL is flaky by construction
+    # once the poller has ingested anything else that same day
+    # (decision_log_claude.md).
     now = datetime.now(timezone.utc)
     ids = []
     for headline, symbol, published_at, ingested_at in [
-        ("today AAPL 1", "AAPL", now - timedelta(hours=1), now - timedelta(hours=1)),
-        ("today AAPL 2", "AAPL", now - timedelta(hours=2), now - timedelta(hours=2)),
-        ("yesterday AAPL", "AAPL", now - timedelta(days=1, hours=1), now - timedelta(days=1, hours=1)),
-        ("today MSFT unwatched", "MSFT", now - timedelta(hours=1), now - timedelta(hours=1)),
+        ("today TESTSYM 1", "TESTSYM", now - timedelta(hours=1), now - timedelta(hours=1)),
+        ("today TESTSYM 2", "TESTSYM", now - timedelta(hours=2), now - timedelta(hours=2)),
+        ("yesterday TESTSYM", "TESTSYM", now - timedelta(days=1, hours=1), now - timedelta(days=1, hours=1)),
+        ("today TESTSYM2 unwatched", "TESTSYM2", now - timedelta(hours=1), now - timedelta(hours=1)),
     ]:
         article_id = str(uuid.uuid4())
         with engine.begin() as conn:
@@ -157,7 +264,7 @@ def seeded_articles(engine):
 def test_overview_stats_scoped_to_watched_symbols(engine, seeded_articles):
     stats = StatsQueries(engine)
 
-    overview = stats.overview_stats(["AAPL"])
+    overview = stats.overview_stats(["TESTSYM"])
 
-    assert overview.articles_ingested_today == 2  # the two today-AAPL articles, not the MSFT one or yesterday's
+    assert overview.articles_ingested_today == 2  # the two today-TESTSYM articles, not TESTSYM2's or yesterday's
     assert overview.tickers_tracked == 1

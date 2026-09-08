@@ -9,15 +9,8 @@ class RollingVolumePoint:
     symbol: str
     date: date
     articles_today: int
-    rolling_7day_avg: float
-
-
-@dataclass(frozen=True)
-class IngestionLagStats:
-    symbol: str
-    avg_lag_seconds: float
-    p50_lag_seconds: float
-    p95_lag_seconds: float
+    rolling_avg_7d: float
+    rolling_avg_30d: float
 
 
 @dataclass(frozen=True)

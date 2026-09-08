@@ -7,8 +7,10 @@ from prices.yahoo_client import DailyBar, NoDataError
 class FakeYahooClient:
     def __init__(self, bars_by_symbol: dict[str, list[DailyBar]]):
         self._bars_by_symbol = bars_by_symbol
+        self.requested_ranges: dict[str, str] = {}
 
     def fetch_daily_bars(self, symbol: str, range_: str = "5d") -> list[DailyBar]:
+        self.requested_ranges[symbol] = range_
         if symbol not in self._bars_by_symbol:
             raise NoDataError(f"unknown symbol: {symbol}")
         return self._bars_by_symbol[symbol]
@@ -54,3 +56,21 @@ def test_run_daily_batch_with_no_watched_symbols_is_a_no_op():
     assert repo.upserted == {}
     assert result.succeeded_symbols == []
     assert result.failed_symbols == []
+
+
+def test_run_daily_batch_defaults_to_5d_range_for_the_scheduled_sweep():
+    bar = DailyBar(date=date(2026, 9, 19), open=1, high=2, low=0.5, close=1.5, volume=100)
+    client = FakeYahooClient({"AAPL": [bar]})
+
+    run_daily_batch(symbols=["AAPL"], yahoo_client=client, prices_repo=FakePricesRepo())
+
+    assert client.requested_ranges["AAPL"] == "5d"
+
+
+def test_run_daily_batch_uses_given_range_for_every_symbol():
+    bar = DailyBar(date=date(2026, 9, 19), open=1, high=2, low=0.5, close=1.5, volume=100)
+    client = FakeYahooClient({"AAPL": [bar]})
+
+    run_daily_batch(symbols=["AAPL"], yahoo_client=client, prices_repo=FakePricesRepo(), range_="1mo")
+
+    assert client.requested_ranges["AAPL"] == "1mo"

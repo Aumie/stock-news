@@ -10,7 +10,7 @@ QUERY_API_URL = os.environ.get("QUERY_API_URL", "http://localhost:8002")
 
 
 def render() -> None:
-    st.title("Stats & Cost Monitoring")
+    st.title("Stats")
 
     client = StatsAPIClient(QUERY_API_URL)
     stats = client.get_stats(st.session_state["jwt"])
@@ -26,30 +26,38 @@ def render() -> None:
         for symbol, symbol_stats in stats["by_symbol"].items():
             st.subheader(symbol)
 
-            volume_rows = symbol_stats["rolling_volume"]
-            if volume_rows:
-                st.write("7-day rolling article volume")
-                st.line_chart(
-                    {row["date"]: row["rolling_7day_avg"] for row in volume_rows},
+            state_key = f"stats_window_days_{symbol}"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = 7
+
+            window_col, _ = st.columns([1, 3])
+            with window_col:
+                choice = st.radio(
+                    "Window",
+                    options=[7, 30],
+                    format_func=lambda d: f"{d}d",
+                    horizontal=True,
+                    index=[7, 30].index(st.session_state[state_key]),
+                    label_visibility="collapsed",
+                    key=f"stats_window_radio_{symbol}",
                 )
+            st.session_state[state_key] = choice
+            window_stats = symbol_stats["window_7d"] if choice == 7 else symbol_stats["window_30d"]
 
-            lag = symbol_stats["ingestion_lag"]
-            lag_col1, lag_col2, lag_col3 = st.columns(3)
-            lag_col1.metric("Avg ingestion lag (s)", round(lag["avg_lag_seconds"], 1))
-            lag_col2.metric("p50 lag (s)", round(lag["p50_lag_seconds"], 1))
-            lag_col3.metric("p95 lag (s)", round(lag["p95_lag_seconds"], 1))
+            st.metric(f"Total ingestion (past {choice}d)", window_stats["total_articles"])
 
-            price_rows = [row for row in symbol_stats["price_deltas"] if row["price_change_pct"] is not None]
+            volume_rows = window_stats["rolling_volume"]
+            st.write(f"Rolling article volume ({choice}d window)")
+            if volume_rows:
+                st.line_chart(
+                    {row["date"]: row["rolling_avg"] for row in volume_rows},
+                )
+            else:
+                st.caption("No data yet — this fills in once the daily batch job has run at least once.")
+
+            price_rows = [row for row in window_stats["price_deltas"] if row["price_change_pct"] is not None]
+            st.write("Day-over-day price change (%)")
             if price_rows:
-                st.write("Day-over-day price change (%)")
                 st.bar_chart({row["date"]: row["price_change_pct"] for row in price_rows})
-
-    st.divider()
-    st.subheader("Cloud cost monitoring")
-    st.info(
-        "Not available in local dev — this section queries BigQuery's "
-        "INFORMATION_SCHEMA.JOBS for bytes scanned plus GCS/Pub-Sub usage APIs "
-        "(§4.6), none of which exist until the milestone 7 cloud migration. "
-        "Shown here, on the same page as stats rather than a separate one, "
-        "per the spec's \"one surface, not two\" requirement."
-    )
+            else:
+                st.caption("No data yet — this fills in once the daily batch job has run at least once.")

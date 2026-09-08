@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -16,13 +18,7 @@ class OverviewResponse(BaseModel):
 class RollingVolumePointResponse(BaseModel):
     date: str
     articles_today: int
-    rolling_7day_avg: float
-
-
-class IngestionLagResponse(BaseModel):
-    avg_lag_seconds: float
-    p50_lag_seconds: float
-    p95_lag_seconds: float
+    rolling_avg: float
 
 
 class PriceDeltaResponse(BaseModel):
@@ -31,10 +27,15 @@ class PriceDeltaResponse(BaseModel):
     price_change_pct: float | None
 
 
-class SymbolStatsResponse(BaseModel):
+class WindowStatsResponse(BaseModel):
+    total_articles: int
     rolling_volume: list[RollingVolumePointResponse]
-    ingestion_lag: IngestionLagResponse
     price_deltas: list[PriceDeltaResponse]
+
+
+class SymbolStatsResponse(BaseModel):
+    window_7d: WindowStatsResponse
+    window_30d: WindowStatsResponse
 
 
 class StatsResponse(BaseModel):
@@ -52,23 +53,41 @@ def build_stats_router(stats_queries: StatsQueries, watchlist_service: Watchlist
 
         by_symbol = {}
         for symbol in symbols:
-            lag = stats_queries.ingestion_lag_stats(symbol)
+            total_7d, total_30d = stats_queries.total_ingestion(symbol)
+
+            volume_points = stats_queries.rolling_article_volume(symbol)
+            volume_7d = [p for p in volume_points if p.date >= date.today() - timedelta(days=7)]
+
+            price_points = stats_queries.price_deltas(symbol)
+            price_7d = [p for p in price_points if p.date >= date.today() - timedelta(days=7)]
+
             by_symbol[symbol] = SymbolStatsResponse(
-                rolling_volume=[
-                    RollingVolumePointResponse(
-                        date=p.date.isoformat(), articles_today=p.articles_today, rolling_7day_avg=p.rolling_7day_avg
-                    )
-                    for p in stats_queries.rolling_article_volume(symbol)
-                ],
-                ingestion_lag=IngestionLagResponse(
-                    avg_lag_seconds=lag.avg_lag_seconds,
-                    p50_lag_seconds=lag.p50_lag_seconds,
-                    p95_lag_seconds=lag.p95_lag_seconds,
+                window_7d=WindowStatsResponse(
+                    total_articles=total_7d,
+                    rolling_volume=[
+                        RollingVolumePointResponse(
+                            date=p.date.isoformat(), articles_today=p.articles_today, rolling_avg=p.rolling_avg_7d
+                        )
+                        for p in volume_7d
+                    ],
+                    price_deltas=[
+                        PriceDeltaResponse(date=d.date.isoformat(), price_close=d.price_close, price_change_pct=d.price_change_pct)
+                        for d in price_7d
+                    ],
                 ),
-                price_deltas=[
-                    PriceDeltaResponse(date=d.date.isoformat(), price_close=d.price_close, price_change_pct=d.price_change_pct)
-                    for d in stats_queries.price_deltas(symbol)
-                ],
+                window_30d=WindowStatsResponse(
+                    total_articles=total_30d,
+                    rolling_volume=[
+                        RollingVolumePointResponse(
+                            date=p.date.isoformat(), articles_today=p.articles_today, rolling_avg=p.rolling_avg_30d
+                        )
+                        for p in volume_points
+                    ],
+                    price_deltas=[
+                        PriceDeltaResponse(date=d.date.isoformat(), price_close=d.price_close, price_change_pct=d.price_change_pct)
+                        for d in price_points
+                    ],
+                ),
             )
 
         return StatsResponse(

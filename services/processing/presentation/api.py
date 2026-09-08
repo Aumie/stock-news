@@ -12,6 +12,7 @@ from infrastructure.logging import configure_logging
 from infrastructure.pubsub import PubSubPushEnvelope, parse_push_envelope
 from infrastructure.settings import Settings
 from infrastructure.unit_of_work import PostgresUnitOfWork
+from presentation.ingest_api import build_ingest_router
 
 settings = Settings()
 configure_logging(settings.log_env)
@@ -26,6 +27,9 @@ _use_case = ProcessArticleUseCase(
     chunker=FixedSizeChunker(),
     embedder=SentenceTransformerEmbedder(settings.embedding_model),
 )
+
+
+app.include_router(build_ingest_router(_use_case))
 
 
 @app.get("/health")
