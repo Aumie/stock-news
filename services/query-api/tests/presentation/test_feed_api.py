@@ -159,11 +159,32 @@ def backfill_service():
     )
 
 
+class FakeBackfillQueue:
+    def __init__(self):
+        self.enqueued: list[list[str]] = []
+
+    def enqueue_symbols_backfill(self, symbols: list[str]) -> None:
+        self.enqueued.append(symbols)
+
+
 @pytest.fixture
-def client_with_backfill(feed_queries, backfill_service):
+def backfill_queue():
+    return FakeBackfillQueue()
+
+
+@pytest.fixture
+def client_with_backfill(feed_queries, backfill_service, backfill_queue):
     watchlist_service = WatchlistService(repo=FakeWatchlistRepo({"user-1": ["AAPL"]}), lookup=None)
     app = FastAPI()
-    app.include_router(build_feed_router(feed_queries, watchlist_service, secret=SECRET, backfill_service=backfill_service))
+    app.include_router(
+        build_feed_router(
+            feed_queries,
+            watchlist_service,
+            secret=SECRET,
+            backfill_service=backfill_service,
+            backfill_queue=backfill_queue,
+        )
+    )
     return TestClient(app)
 
 
@@ -183,7 +204,7 @@ def test_feed_backfill_more_requires_auth(client_with_backfill):
     assert response.status_code == 401
 
 
-def test_feed_load_older_returns_items_and_exhausted_flag(client_with_backfill):
+def test_feed_load_older_returns_items_when_postgres_already_has_them(client_with_backfill):
     response = client_with_backfill.post(
         "/feed/load-older",
         json={"before": "2026-09-01T00:00:00+00:00", "before_id": "abc-123"},
@@ -193,7 +214,34 @@ def test_feed_load_older_returns_items_and_exhausted_flag(client_with_backfill):
     assert response.status_code == 200
     body = response.json()
     assert body["items"][0]["headline"] == "h"
-    assert body["exhausted"] is False
+    assert body["backfilling"] is False
+
+
+def test_feed_load_older_enqueues_background_backfill_when_postgres_is_empty(backfill_service, backfill_queue):
+    class EmptyFeedQueries:
+        def recent_for_symbols(self, symbols, limit=50, before=None, before_id=None, per_symbol_limit=None):
+            return []
+
+    watchlist_service = WatchlistService(repo=FakeWatchlistRepo({"user-1": ["AAPL"]}), lookup=None)
+    app = FastAPI()
+    app.include_router(
+        build_feed_router(
+            EmptyFeedQueries(),
+            watchlist_service,
+            secret=SECRET,
+            backfill_service=backfill_service,
+            backfill_queue=backfill_queue,
+        )
+    )
+    client = TestClient(app)
+
+    response = client.post("/feed/load-older", json={}, headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["items"] == []
+    assert body["backfilling"] is True
+    assert backfill_queue.enqueued == [["AAPL"]]
 
 
 def test_feed_load_older_without_cursor_for_first_page(client_with_backfill):

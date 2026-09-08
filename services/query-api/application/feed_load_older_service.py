@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Protocol
 
-from domain.backfill import MultiSymbolBackfillResult
 from domain.feed import FeedItem
 
 
@@ -13,27 +12,29 @@ class FeedQueriesProtocol(Protocol):
     ) -> list[FeedItem]: ...
 
 
-class BackfillServiceProtocol(Protocol):
-    def load_more_for_symbols(self, symbols: list[str]) -> MultiSymbolBackfillResult: ...
+class BackfillQueueProtocol(Protocol):
+    def enqueue_symbols_backfill(self, symbols: list[str]) -> None: ...
 
 
 class FeedLoadOlderService:
     """Combines "page older news" and "backfill further back" into one
     action (user request): try Postgres first (cheap), and only reach for
-    Finnhub if paging is genuinely exhausted — extending automatically
-    through empty windows up to a bounded number of attempts, rather than
-    making the user click "load more" repeatedly through stretches with no
-    news. Each attempt extends by BackfillService.BACKFILL_WINDOW_DAYS.
+    Finnhub if paging is genuinely exhausted.
+
+    The backfill itself runs as a background Celery task, not inline —
+    Finnhub's company-news endpoint was found live to be unreliable enough
+    (each chunk can take up to its full timeout, and the old synchronous
+    version retried up to 6 times) that this endpoint could block for
+    1-2+ minutes under real conditions. One click enqueues exactly one
+    backfill window per symbol and returns immediately; if the page is
+    still empty afterward, the user clicks "load older" again to check —
+    mirrors clicking a button repeatedly rather than blocking the request
+    on however long Finnhub takes (decision_log.md).
     """
 
-    # Caps the worst case (a symbol with sparse or no coverage) to a handful
-    # of real Finnhub calls per click, not an unbounded loop back through
-    # years of empty history (user's explicit choice over no cap at all).
-    MAX_BACKFILL_ATTEMPTS = 6
-
-    def __init__(self, feed_queries: FeedQueriesProtocol, backfill_service: BackfillServiceProtocol) -> None:
+    def __init__(self, feed_queries: FeedQueriesProtocol, backfill_queue: BackfillQueueProtocol) -> None:
         self._feed_queries = feed_queries
-        self._backfill_service = backfill_service
+        self._backfill_queue = backfill_queue
 
     def load_older(
         self, symbols: list[str], before: datetime | None, before_id: str | None
@@ -42,16 +43,5 @@ class FeedLoadOlderService:
         if items:
             return items, False
 
-        for _ in range(self.MAX_BACKFILL_ATTEMPTS):
-            result = self._backfill_service.load_more_for_symbols(symbols)
-            items = self._feed_queries.recent_for_symbols(symbols, before=before, before_id=before_id)
-            if items:
-                return items, False
-            # has_more=False on every symbol means Finnhub returned nothing
-            # for that whole window across the board — no point burning
-            # through the remaining attempts on windows further back that
-            # are equally likely to be empty (e.g. a genuinely dead symbol).
-            if all(not r.result.has_more for r in result.per_symbol):
-                break
-
+        self._backfill_queue.enqueue_symbols_backfill(symbols)
         return [], True

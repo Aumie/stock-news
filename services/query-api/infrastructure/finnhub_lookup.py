@@ -9,17 +9,33 @@ class InvalidSymbolError(Exception):
     """Raised when Finnhub's symbol search has no exact match for a ticker."""
 
 
+class SymbolLookupUnavailableError(Exception):
+    """Raised when Finnhub's /search endpoint itself is unreachable or
+    erroring (network failure, timeout, 5xx) — distinct from
+    InvalidSymbolError, which means Finnhub *answered* and the symbol
+    genuinely doesn't exist. Real bug found live: a raw 503 from Finnhub
+    propagated as an unhandled httpx.HTTPStatusError, crashing the request
+    with a generic 500 instead of an honest "try again" response
+    (decision_log.md).
+    """
+
+
 class FinnhubSymbolLookup:
     def __init__(self, http_client: httpx.Client, api_key: str) -> None:
         self._http = http_client
         self._api_key = api_key
 
     def validate(self, symbol: str) -> None:
-        response = self._http.get(
-            f"{BASE_URL}/search",
-            params={"q": symbol, "token": self._api_key},
-        )
-        response.raise_for_status()
+        try:
+            response = self._http.get(
+                f"{BASE_URL}/search",
+                params={"q": symbol, "token": self._api_key},
+            )
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise SymbolLookupUnavailableError(f"Finnhub symbol lookup failed: {exc}") from exc
+        except httpx.TransportError as exc:
+            raise SymbolLookupUnavailableError(f"Finnhub symbol lookup unreachable: {exc}") from exc
         results = response.json().get("result", [])
         # Finnhub's /search is fuzzy and returns cross-exchange matches
         # (AAPL.TO, AAPL.MX, ...) for a query like "AAPL" — accepting "any

@@ -20,14 +20,14 @@ def render() -> None:
         new_symbol = st.text_input("Add a symbol (e.g. AAPL)")
         submitted = st.form_submit_button("Add")
         if submitted and new_symbol.strip():
-            with st.spinner(f"Adding {new_symbol.strip().upper()} and pulling the last 2 weeks of news..."):
+            with st.spinner(f"Validating {new_symbol.strip().upper()}..."):
                 ok, error = client.add_symbol(jwt, new_symbol.strip())
             if ok:
                 st.rerun()
             else:
                 # Inline validation error, not a silent failure (§4.1,
                 # docs/stock-news-digest-requirements.md's watchlist-management line).
-                st.error(f"'{new_symbol.strip().upper()}' was rejected: {error}")
+                st.error(f"Couldn't add '{new_symbol.strip().upper()}': {error}")
 
     entries = client.list_symbols(jwt)
     if not entries:
@@ -36,7 +36,17 @@ def render() -> None:
 
     for entry in entries:
         col1, col2 = st.columns([4, 1])
-        col1.write(f"**{entry['symbol']}** — added {format_timestamp(entry['added_at'])}")
+        label = f"**{entry['symbol']}** — added {format_timestamp(entry['added_at'])}"
+        col1.write(label)
+        if entry["backfill_pending"]:
+            # The news/price backfill runs in a background Celery task, not
+            # inline (decision_log.md) — this badge is the honest "still
+            # working on it" state, since a freshly-added symbol otherwise
+            # just looks empty/incomplete with no explanation (user
+            # request). Clears itself on the next natural rerun (switching
+            # pages, clicking another button, reloading) once the backfill
+            # actually lands — no polling loop needed.
+            col1.caption("⏳ Backfilling news in the background — check back in a moment.")
         if col2.button("Remove", key=f"remove_{entry['symbol']}"):
             client.remove_symbol(jwt, entry["symbol"])
             st.rerun()

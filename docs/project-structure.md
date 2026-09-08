@@ -76,9 +76,10 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   ├── application/
 │   │   │   ├── query_service.py   # retrieval + LLM call/streaming (§4.4); grows into full layering in v2 once tool-routing lands (§12.3)
 │   │   │   ├── watchlist_service.py # add/list/remove, Finnhub validation before persisting (§4.1, milestone 6);
-│   │   │   │                      # optionally triggers a BackfillService (news) and a JobTrigger (price/feature-store,
-│   │   │   │                      # new v1 feature mirroring the news mechanism, decision_log.md) on add — both optional
-│   │   │   │                      # dependencies, same shape, so either can be omitted without breaking add_symbol
+│   │   │   │                      # optionally enqueues a BackfillQueue task (news + price/feature-store backfill,
+│   │   │   │                      # both run in the Celery worker now, not inline) on add — POST /watchlist returns
+│   │   │   │                      # as soon as validation+persist finish, not after the backfill completes (user
+│   │   │   │                      # request: "shouldnt it be instant", decision_log.md)
 │   │   │   ├── backfill_service.py # backfill_on_add() (BACKFILL_WINDOW_DAYS=30) / load_more() (extends 30 more
 │   │   │   │                      # days back, and runs an initial backfill instead of erroring if the symbol was
 │   │   │   │                      # never backfilled — real bug found live, decision_log_claude.md) /
@@ -96,12 +97,13 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   │   │                      # permanently marked "backfilled" with zero articles, silently blocking any later
 │   │   │   │                      # retry (decision_log_claude.md)
 │   │   │   └── feed_load_older_service.py # FeedLoadOlderService — combines paging (FeedQueries, cheap) and backfilling
-│   │   │                          # (BackfillService, real Finnhub calls) into one action for the Live Feed's single
-│   │   │                          # "Load older news" button (user request: merge the two separate buttons). Pages
-│   │   │                          # first; only backfills if that's empty, retrying through empty windows up to
-│   │   │                          # MAX_BACKFILL_ATTEMPTS=6 (~3 months, user's chosen cap) before returning
-│   │   │                          # exhausted=True. Live-verified: a deliberately-too-far cursor ran the full 108s
-│   │   │                          # loop and correctly reported exhausted rather than hanging (decision_log_claude.md)
+│   │   │                          # into one action for the Live Feed's single "Load older news" button (user
+│   │   │                          # request: merge the two separate buttons). Pages first; if that's empty, enqueues
+│   │   │                          # one background backfill window per symbol (BackfillQueue) and returns
+│   │   │                          # immediately with backfilling=True — no longer a synchronous up-to-6-attempts
+│   │   │                          # retry loop, since that could block the request 1-2+ minutes under Finnhub's
+│   │   │                          # known flakiness (real bug reported live: "loading older news takes so long",
+│   │   │                          # decision_log.md). Live-verified: 95s+ before this fix, 0.27s after
 │   │   ├── infrastructure/
 │   │   │   ├── pgvector_search.py # PgVectorRetriever — ORDER BY fixed to rank by vector similarity, not article_id (decision_log_claude.md: a real correctness bug found while debugging a flaky test, retrieval was effectively unranked once more than top_k articles existed for a symbol)
 │   │   │   ├── stats_queries.py   # real window-function SQL against daily_symbol_features (§4.6, milestone 5) —
@@ -123,7 +125,12 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   │   │                      # ROW_NUMBER() PARTITION BY symbol, merged and re-sorted — real bug found live: a
 │   │   │   │                      # high-volume symbol crowded a newly-added quieter symbol almost entirely out of the
 │   │   │   │                      # feed even though its articles were real and present (decision_log_claude.md)
-│   │   │   ├── finnhub_lookup.py  # FinnhubSymbolLookup — exact-match validation against /search, rejecting fuzzy cross-exchange matches (§4.1, milestone 6)
+│   │   │   ├── finnhub_lookup.py  # FinnhubSymbolLookup — exact-match validation against /search, rejecting fuzzy
+│   │   │   │                      # cross-exchange matches (§4.1, milestone 6). Raises SymbolLookupUnavailableError
+│   │   │   │                      # (mapped to 503) on a network failure or 5xx from /search itself, distinct from
+│   │   │   │                      # InvalidSymbolError (422, Finnhub answered and the symbol doesn't exist) — real
+│   │   │   │                      # bug found live: a genuine Finnhub 503 used to propagate as an unhandled 500
+│   │   │   │                      # (decision_log.md)
 │   │   │   ├── finnhub_news_client.py # FinnhubNewsClient — Python port of poller's Go CompanyNews, used for on-demand backfill (not the continuous poll cycle)
 │   │   │   ├── processing_ingest_client.py # calls processing's POST /articles/ingest directly — no Pub/Sub envelope (decision_log.md)
 │   │   │   ├── postgres_watchlist_repo.py # idempotent add (ON CONFLICT DO UPDATE), scoped list/remove (milestone 6)
@@ -135,6 +142,19 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   │   │                      # GCP Cloud Run Jobs API, is deferred to the milestone 7 cloud migration itself —
 │   │   │   │                      # same "don't write untestable cloud-only code early" precedent as the BigQuery gap,
 │   │   │   │                      # decision_log.md). Selected only when COMPOSE_PROJECT_NAME is set (settings.py)
+│   │   │   ├── celery_app.py      # Celery app + task definitions (backfill_symbol, backfill_symbols_older) — the
+│   │   │   │                      # watchlist-add and load-older backfills both run here now, off the request path
+│   │   │   │                      # (user request: "shouldnt it be instant", decision_log.md). Durable task queue,
+│   │   │   │                      # mingle/gossip/heartbeat disabled — RabbitMQ 4.x rejects Celery/kombu's default
+│   │   │   │                      # transient+non-exclusive queue declarations outright, confirmed live
+│   │   │   │                      # (decision_log.md). Builds BackfillService/JobTrigger once per worker process via
+│   │   │   │                      # backfill_dependencies.py, the same factory api.py uses
+│   │   │   ├── backfill_dependencies.py # build_backfill_service()/build_job_trigger() — shared wiring used by both
+│   │   │   │                      # api.py and celery_app.py, so the FastAPI process and the Celery worker can't
+│   │   │   │                      # drift into constructing BackfillService/JobTrigger differently
+│   │   │   ├── celery_backfill_queue.py # CeleryBackfillQueue — implements BackfillQueue (WatchlistService) and
+│   │   │   │                      # FeedLoadOlderService's queue protocol by publishing to celery_app's tasks by
+│   │   │   │                      # name, not importing the worker's own dependency wiring into the request path
 │   │   │   ├── llm_client.py      # streaming LLM call + spend-ceiling handling (§4.4)
 │   │   │   ├── stub_llm.py        # StubLLMClient — zero-cost local/demo fallback when ANTHROPIC_API_KEY isn't set (decision_log_claude.md)
 │   │   │   ├── jwt_verify.py      # local JWT verification, no call back to Auth (§6)
@@ -143,7 +163,12 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 │   │   ├── presentation/
 │   │   │   ├── api.py             # FastAPI app — wires all routers below plus /health
 │   │   │   ├── query_api.py       # /query — symbols now derived from the caller's watchlist, not the request body (milestone 6, api-spec.md)
-│   │   │   ├── watchlist_api.py   # GET/POST /watchlist, DELETE /watchlist/{symbol} (milestone 6) — backfill-more lives on feed_api.py instead, see below
+│   │   │   ├── watchlist_api.py   # GET/POST /watchlist, DELETE /watchlist/{symbol} (milestone 6) — backfill-more
+│   │   │   │                      # lives on feed_api.py instead, see below. GET /watchlist's response carries a
+│   │   │   │                      # backfill_pending bool per entry (derived from symbol_backfill_progress, an
+│   │   │   │                      # optional backfill_progress_repo param) so the UI can show a "still backfilling"
+│   │   │   │                      # state for a just-added symbol instead of it silently looking empty (user
+│   │   │   │                      # request, decision_log.md)
 │   │   │   ├── feed_api.py        # GET /feed (milestone 6, pagination + first-page-only per-symbol quota via
 │   │   │   │                      # FIRST_PAGE_PER_SYMBOL_LIMIT=10), POST /feed/backfill-more (per-symbol backfill
 │   │   │   │                      # primitive, moved here from watchlist_api.py per user request), and
@@ -287,7 +312,10 @@ Monorepo, one repo covering all 6 deployables (§6) — simplest for a solo buil
 ├── docker-compose.yml               # local dev — all 6 services + Postgres, no cloud dependency (§10.1). query-api's
 │                                     # service mounts the Docker socket + this repo root (read-only, at /workspace) —
 │                                     # local-only, for LocalDockerJobTrigger (decision_log.md); never present in the
-│                                     # cloud deployment
+│                                     # cloud deployment. Plus rabbitmq (Celery's broker; CloudAMQP free tier at the
+│                                     # cloud migration, decision_log.md) and celery-worker (same image as query-api,
+│                                     # different command — runs the watchlist-add and load-older backfill tasks off
+│                                     # the request path)
 ├── .github/workflows/
 │   ├── ci.yml                       # runs on every branch/PR — tests + lint (§10.3)
 │   └── cd.yml                       # gated to main only — terraform plan on PR, apply on merge (§10.4)

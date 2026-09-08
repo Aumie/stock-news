@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from infrastructure.finnhub_lookup import FinnhubSymbolLookup, InvalidSymbolError
+from infrastructure.finnhub_lookup import FinnhubSymbolLookup, InvalidSymbolError, SymbolLookupUnavailableError
 
 SEARCH_RESPONSE = {
     "count": 8,
@@ -51,3 +51,24 @@ def test_validate_rejects_unknown_symbol(httpx_mock):
 
     with pytest.raises(InvalidSymbolError):
         lookup.validate("ZZZNOTAREALTICKER")
+
+
+def test_validate_raises_unavailable_error_on_finnhub_5xx(httpx_mock):
+    # Real bug found live: a genuine Finnhub 503 propagated as an unhandled
+    # httpx.HTTPStatusError, crashing the request with a raw 500 instead of
+    # a distinguishable "try again" error (decision_log.md). Distinct from
+    # InvalidSymbolError, which means Finnhub answered and the symbol
+    # genuinely doesn't exist — this means Finnhub itself didn't answer.
+    httpx_mock.add_response(status_code=503)
+    lookup = FinnhubSymbolLookup(http_client=httpx.Client(), api_key="test-key")
+
+    with pytest.raises(SymbolLookupUnavailableError):
+        lookup.validate("AAPL")
+
+
+def test_validate_raises_unavailable_error_on_network_failure(httpx_mock):
+    httpx_mock.add_exception(httpx.ConnectTimeout("connection timed out"))
+    lookup = FinnhubSymbolLookup(http_client=httpx.Client(), api_key="test-key")
+
+    with pytest.raises(SymbolLookupUnavailableError):
+        lookup.validate("AAPL")

@@ -21,15 +21,21 @@ class WatchlistAPIClient:
             f"{self._base_url}/watchlist",
             headers={"Authorization": f"Bearer {jwt}"},
             json={"symbol": symbol},
-            # Add triggers a synchronous 30-day news backfill server-side,
-            # fetched as three sequential <=14-day Finnhub calls (a single
-            # 30-day request isn't reliable for a busy symbol, decision_log.md)
-            # — confirmed live at ~9s per chunk, ~30s+ total for a busy
-            # symbol, well past a plain CRUD request's usual budget.
-            timeout=120.0,
+            # The response returns as soon as symbol validation + the DB
+            # write finish — the news/price backfill runs in a background
+            # Celery task, not inline (decision_log.md) — so this only needs
+            # to budget for the one synchronous Finnhub /search call.
+            timeout=15.0,
         )
         if response.status_code == 422:
             return False, response.json().get("detail", "invalid symbol")
+        if response.status_code == 503:
+            # Real bug found live: Finnhub's /search itself was down (a
+            # genuine 503), which used to crash this call with an unhandled
+            # 500 — distinct from 422 (symbol genuinely doesn't exist), this
+            # means validation couldn't happen at all right now
+            # (decision_log.md).
+            return False, response.json().get("detail", "symbol validation is temporarily unavailable")
         response.raise_for_status()
         return True, None
 

@@ -21,3 +21,7 @@ class Settings(BaseSettings):
     # pins this to "stock-news"). Unset in the cloud image; the milestone 7
     # migration wires CloudRunJobTrigger there instead (decision_log.md).
     compose_project_name: str = ""
+    # RabbitMQ broker for Celery's watchlist-add backfill task queue — a
+    # local docker-compose service here, CloudAMQP's free "Little Lemur"
+    # tier at the milestone 7 cloud migration (decision_log.md).
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672//"

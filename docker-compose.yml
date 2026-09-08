@@ -38,6 +38,23 @@ services:
       timeout: 5s
       retries: 10
 
+  rabbitmq:
+    # Celery's broker for the watchlist-add backfill task queue — a plain
+    # container locally, CloudAMQP's free "Little Lemur" tier at the
+    # milestone 7 cloud migration (decision_log.md). Not the same queue as
+    # pubsub-emulator above: that one decouples the poller's unbounded async
+    # arrivals from processing; this one exists so POST /watchlist can
+    # return instantly instead of blocking on a slow/flaky Finnhub backfill.
+    image: rabbitmq:4-management
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   processing:
     build: ./services/processing
     ports:
@@ -60,6 +77,7 @@ services:
       FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
       PROCESSING_URL: http://processing:8001
       LOG_ENV: dev
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
       # Local-dev only (decision_log.md) — selects LocalDockerJobTrigger,
       # which shells out to `docker compose -p stock-news ...`. Matches the
       # `name:` pin at the top of this file. Never set in the cloud image;
@@ -82,6 +100,46 @@ services:
         condition: service_healthy
       processing:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
+
+  celery-worker:
+    # Runs the watchlist-add backfill task (news + price-job trigger) off
+    # the request path — POST /watchlist enqueues and returns immediately,
+    # this container actually does the slow/Finnhub-flaky work
+    # (decision_log.md). Same image as query-api (identical dependencies,
+    # identical BackfillService/JobTrigger wiring via
+    # infrastructure/backfill_dependencies.py), different entrypoint.
+    build: ./services/query-api
+    # --without-mingle/--without-gossip/--without-heartbeat: these startup
+    # bootsteps broadcast over Celery's pidbox mechanism, which declares its
+    # own transient+non-exclusive reply queue regardless of the
+    # worker_enable_remote_control/worker_send_task_events settings —
+    # confirmed live to hit the same RabbitMQ 4.x deprecation error even
+    # with those settings off (decision_log.md). Not real options in a
+    # settings file, CLI-only (celery#2566) — fine here since gossip/mingle
+    # only matter for multi-worker coordination, which this single-worker
+    # setup doesn't need.
+    command: ["uv", "run", "celery", "-A", "infrastructure.celery_app", "worker", "--loglevel=info", "--without-mingle", "--without-gossip", "--without-heartbeat"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/stock-news
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      PROCESSING_URL: http://processing:8001
+      LOG_ENV: dev
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+      COMPOSE_PROJECT_NAME: stock-news
+    volumes:
+      # Same local-only job-trigger mounts as query-api — this worker is the
+      # one that actually calls JobTrigger.trigger_for_symbol() now.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      processing:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   auth:
     build: ./services/auth

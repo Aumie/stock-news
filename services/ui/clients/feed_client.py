@@ -38,11 +38,11 @@ class FeedAPIClient:
             f"{self._base_url}/feed/load-older",
             headers={"Authorization": f"Bearer {jwt}"},
             json={"before": before, "before_id": before_id},
-            # Combines paging existing Postgres data with, if that's
-            # exhausted, up to 6 real Finnhub backfill calls (user request:
-            # one button instead of two) — the same generous timeout as
-            # backfill_more, since the worst case does that many times over.
-            timeout=180.0,
+            # Pages existing Postgres data (cheap) and, if that's empty,
+            # enqueues a background Celery task and returns immediately —
+            # no longer blocks on Finnhub itself (decision_log.md), so a
+            # plain fast timeout is enough.
+            timeout=10.0,
         )
         response.raise_for_status()
         return response.json()

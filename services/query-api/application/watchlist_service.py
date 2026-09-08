@@ -15,12 +15,8 @@ class SymbolLookup(Protocol):
     def validate(self, symbol: str) -> None: ...
 
 
-class BackfillTrigger(Protocol):
-    def backfill_on_add(self, symbol: str) -> object: ...
-
-
-class JobTrigger(Protocol):
-    def trigger_for_symbol(self, symbol: str) -> None: ...
+class BackfillQueue(Protocol):
+    def enqueue_symbol_backfill(self, symbol: str) -> None: ...
 
 
 class WatchlistService:
@@ -28,13 +24,11 @@ class WatchlistService:
         self,
         repo: WatchlistRepository,
         lookup: SymbolLookup,
-        backfill_service: BackfillTrigger | None = None,
-        job_trigger: JobTrigger | None = None,
+        backfill_queue: BackfillQueue | None = None,
     ) -> None:
         self._repo = repo
         self._lookup = lookup
-        self._backfill_service = backfill_service
-        self._job_trigger = job_trigger
+        self._backfill_queue = backfill_queue
 
     def list_symbols(self, user_id: str) -> list[WatchlistEntry]:
         return self._repo.list_for_user(user_id)
@@ -45,10 +39,14 @@ class WatchlistService:
         # caller (presentation layer) maps it to a 422 (§4.1, api-spec.md).
         self._lookup.validate(symbol)
         entry = self._repo.add(user_id, symbol)
-        if self._backfill_service is not None:
-            self._backfill_service.backfill_on_add(symbol)
-        if self._job_trigger is not None:
-            self._job_trigger.trigger_for_symbol(symbol)
+        # News + price backfill run as a background Celery task, not inline —
+        # the synchronous version could take 30s-2min+ under Finnhub's known
+        # flakiness (decision_log.md), which made "add a symbol" feel hung
+        # from the UI's perspective even when it would eventually succeed.
+        # Enqueueing is expected to be near-instant regardless of how long
+        # the backfill itself takes.
+        if self._backfill_queue is not None:
+            self._backfill_queue.enqueue_symbol_backfill(symbol)
         return entry
 
     def remove_symbol(self, user_id: str, symbol: str) -> None:

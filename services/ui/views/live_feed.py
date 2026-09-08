@@ -22,18 +22,35 @@ def render() -> None:
 
     if st.button("Refresh"):
         st.session_state.pop("feed_items", None)
+        st.session_state.pop("feed_items_symbols", None)
         st.rerun()
 
-    watched_symbols = sorted(entry["symbol"] for entry in watchlist_client.list_symbols(jwt))
+    watchlist_entries = watchlist_client.list_symbols(jwt)
+    watched_symbols = sorted(entry["symbol"] for entry in watchlist_entries)
+    pending_symbols = sorted(entry["symbol"] for entry in watchlist_entries if entry["backfill_pending"])
     selected_symbols = st.multiselect(
         "Filter by symbol", options=watched_symbols, default=watched_symbols
     )
 
+    if pending_symbols:
+        # Explains why a just-added symbol shows no articles yet, rather
+        # than looking silently broken — the backfill runs in a background
+        # Celery task, not inline (decision_log.md). Clears itself on the
+        # next natural rerun once the backfill actually lands.
+        st.caption(f"⏳ Still backfilling news for: {', '.join(pending_symbols)}")
+
     # feed_items accumulates across "Load older news" clicks — a fresh
     # GET /feed only ever returns the first page (most recent), so older
     # pages are appended here rather than replacing what's already shown.
-    if "feed_items" not in st.session_state:
+    # Real bug found live: this cache used to only ever clear on an
+    # explicit "Refresh" click, so adding a symbol on the Watchlist page and
+    # switching back to Live Feed showed stale data — the watchlist itself
+    # had changed, but nothing here noticed. Re-fetch whenever the set of
+    # watched symbols differs from what feed_items was last fetched for,
+    # not just on an explicit click (decision_log.md).
+    if st.session_state.get("feed_items_symbols") != set(watched_symbols):
         st.session_state["feed_items"] = feed_client.recent(jwt)
+        st.session_state["feed_items_symbols"] = set(watched_symbols)
 
     items = sort_and_filter_feed(st.session_state["feed_items"], selected_symbols)
 
@@ -56,19 +73,23 @@ def render() -> None:
                 )
 
     # One combined action (user request), not two separate buttons: page
-    # existing Postgres data first (cheap), and only reach for Finnhub —
-    # extending automatically through empty windows up to a bounded number
-    # of attempts server-side (FeedLoadOlderService) — once paging is
-    # genuinely exhausted. Fixes the real bug where a separate "load 2 more
-    # weeks" button fetched real articles that a fixed top-50 feed then had
-    # no way to ever display.
+    # existing Postgres data first (cheap), and only reach for Finnhub if
+    # paging is empty. The Finnhub backfill itself now runs as a background
+    # Celery task rather than blocking this request — Finnhub's company-news
+    # endpoint was found live to be unreliable enough (each chunk can take
+    # up to its full timeout) that the old synchronous version could block
+    # this click for 1-2+ minutes. A "still loading" click enqueues the
+    # backfill and returns immediately; click "Load older news" again
+    # shortly to check whether it's landed (decision_log.md).
     if st.button("Load older news"):
         cursor = next_page_cursor(sort_and_filter_feed(st.session_state["feed_items"], []))
         before, before_id = cursor if cursor is not None else (None, None)
-        with st.spinner("Loading older news..."):
-            result = feed_client.load_older(jwt, before=before, before_id=before_id)
+        result = feed_client.load_older(jwt, before=before, before_id=before_id)
         if not result["items"]:
-            st.info("No older news found." if result["exhausted"] else "No older news found for now — try again shortly.")
+            if result["backfilling"]:
+                st.info("No older news cached yet — fetching more in the background. Try again in a moment.")
+            else:
+                st.info("No older news found.")
         else:
             st.session_state["feed_items"] = st.session_state["feed_items"] + result["items"]
             st.rerun()

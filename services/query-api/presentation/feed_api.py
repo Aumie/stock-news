@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from application.backfill_service import BackfillService
-from application.feed_load_older_service import FeedLoadOlderService
+from application.feed_load_older_service import BackfillQueueProtocol, FeedLoadOlderService
 from application.watchlist_service import WatchlistService
 from infrastructure.feed_queries import FeedQueries
 from presentation.auth_dependency import require_auth
@@ -42,7 +42,12 @@ class LoadOlderRequest(BaseModel):
 
 class LoadOlderResponse(BaseModel):
     items: list[FeedItemResponse]
-    exhausted: bool
+    # True when Postgres had nothing for this cursor and a background
+    # backfill was enqueued instead — the caller should try again shortly
+    # (e.g. a "Refresh" click) rather than expect items in this same
+    # response, since the backfill no longer runs synchronously
+    # (decision_log.md).
+    backfilling: bool
 
 
 # Guarantees a newly-added symbol shows real recent articles on the first
@@ -57,9 +62,10 @@ def build_feed_router(
     watchlist_service: WatchlistService,
     secret: str,
     backfill_service: BackfillService | None = None,
+    backfill_queue: BackfillQueueProtocol | None = None,
 ) -> APIRouter:
     router = APIRouter()
-    load_older_service = FeedLoadOlderService(feed_queries, backfill_service) if backfill_service is not None else None
+    load_older_service = FeedLoadOlderService(feed_queries, backfill_queue) if backfill_queue is not None else None
 
     @router.get("/feed", response_model=list[FeedItemResponse])
     def feed(
@@ -106,7 +112,7 @@ def build_feed_router(
     @router.post("/feed/load-older", response_model=LoadOlderResponse)
     def load_older(request: LoadOlderRequest, user_id: str = require_auth(secret=secret)):
         symbols = [entry.symbol for entry in watchlist_service.list_symbols(user_id)]
-        items, exhausted = load_older_service.load_older(symbols, before=request.before, before_id=request.before_id)
+        items, backfilling = load_older_service.load_older(symbols, before=request.before, before_id=request.before_id)
         return LoadOlderResponse(
             items=[
                 FeedItemResponse(
@@ -120,7 +126,7 @@ def build_feed_router(
                 )
                 for item in items
             ],
-            exhausted=exhausted,
+            backfilling=backfilling,
         )
 
     return router
