@@ -7,6 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from clients.stats_client import StatsAPIClient
+from clients.watchlist_client import WatchlistAPIClient
 
 QUERY_API_URL = os.environ.get("QUERY_API_URL", "http://localhost:8002")
 
@@ -15,7 +16,16 @@ def render() -> None:
     st.title("Stats")
 
     client = StatsAPIClient(QUERY_API_URL)
+    watchlist_client = WatchlistAPIClient(QUERY_API_URL)
     stats = client.get_stats(st.session_state["jwt"])
+    # backfill_pending per symbol, same signal Watchlist/Live Feed already
+    # show — a freshly-added symbol has no daily_symbol_features rows yet
+    # (dbt hasn't run for it), which without this reads as a permanent gap
+    # ("No data yet") rather than the transient backfill-in-progress state
+    # it actually is (decision_log_claude.md).
+    pending_by_symbol = {
+        entry["symbol"]: entry["backfill_pending"] for entry in watchlist_client.list_symbols(st.session_state["jwt"])
+    }
 
     overview = stats["overview"]
     col1, col2 = st.columns(2)
@@ -27,6 +37,8 @@ def render() -> None:
     else:
         for symbol, symbol_stats in stats["by_symbol"].items():
             st.subheader(symbol)
+            if pending_by_symbol.get(symbol):
+                st.caption("⏳ Backfilling news in the background — stats will fill in once it completes.")
 
             state_key = f"stats_window_days_{symbol}"
             if state_key not in st.session_state:

@@ -32,11 +32,16 @@ class FakeNewsClient:
 
 
 class FakeIngestClient:
-    def __init__(self, new_article_ids: list[str] | None = None):
+    def __init__(self, new_article_ids: list[str] | None = None, failing_headlines: set[str] | None = None):
         self.ingested: list[tuple[NewsArticle, str]] = []
         self._new_article_ids = new_article_ids
+        self._failing_headlines = failing_headlines or set()
 
     def ingest(self, article: NewsArticle, symbol: str) -> str:
+        if article.headline in self._failing_headlines:
+            raise httpx.HTTPStatusError(
+                "simulated processing 500", request=httpx.Request("POST", "http://processing/articles/ingest"), response=httpx.Response(500, request=httpx.Request("POST", "http://processing/articles/ingest"))
+            )
         self.ingested.append((article, symbol))
         idx = len(self.ingested) - 1
         if self._new_article_ids is not None:
@@ -268,6 +273,29 @@ def test_progress_is_recorded_when_at_least_one_chunk_succeeds_even_with_zero_ar
     result = service.backfill_on_add("AAPL")
 
     assert result.articles_fetched == 0
+    assert progress_repo.get_earliest_backfilled("AAPL") == TODAY - timedelta(days=30)
+
+
+def test_a_single_articles_ingest_failure_does_not_crash_the_whole_backfill():
+    # Real bug found live: Finnhub's fetch for AAPL succeeded, but
+    # processing's /articles/ingest genuinely 500'd for one article — with no
+    # try/except around the ingest call, that raised all the way up through
+    # backfill_on_add and crashed the entire Celery task before it ever
+    # reached trigger_for_symbol (the price/dbt rebuild step). Result:
+    # symbol_backfill_progress got a row from a *later*, unrelated task
+    # (backfill_symbols_older), so the UI showed AAPL as no longer pending,
+    # but daily_symbol_features had zero rows for it since the dbt rebuild
+    # never ran (decision_log_claude.md). One bad article must be skipped
+    # like a failed chunk already is, not take down the whole backfill.
+    news_client = FakeNewsClient({CHUNK_1: [_article("good"), _article("bad"), _article("also good")]})
+    ingest_client = FakeIngestClient(failing_headlines={"bad"})
+    progress_repo = FakeProgressRepo()
+    service = BackfillService(news_client, ingest_client, progress_repo, clock=FakeClock())
+
+    result = service.backfill_on_add("AAPL")  # does not raise
+
+    assert result.articles_fetched == 2  # "good" and "also good", "bad" skipped
+    assert [a.headline for a, _ in ingest_client.ingested] == ["good", "also good"]
     assert progress_repo.get_earliest_backfilled("AAPL") == TODAY - timedelta(days=30)
 
 

@@ -21,7 +21,11 @@ def build_backfill_service(settings: Settings) -> BackfillService:
     the Celery worker (for the watchlist-add background task), so the two
     processes can't drift into constructing these differently.
     """
-    engine = create_engine(settings.database_url)
+    # pool_pre_ping: celery-worker is long-lived, same stale-connection
+    # exposure as query-api's engine (presentation/api.py) after a Postgres
+    # restart — hit live inside a running Celery task at least once this
+    # session (decision_log_claude.md's "no automatic way back" entry).
+    engine = create_engine(settings.database_url, pool_pre_ping=True)
     # 30s, not 10s — the company-news fetch genuinely got slower once the
     # backfill window widened to 30 days (a real ReadTimeout hit live at
     # 10s for a busy symbol, decision_log.md).

@@ -32,7 +32,15 @@ logger = structlog.get_logger()
 
 app = FastAPI(title="query-api")
 
-_engine = create_engine(settings.database_url)
+# pool_pre_ping: this project's Postgres container gets restarted often
+# enough in local dev (Docker Desktop instability, manual restarts to clear
+# other issues) that a long-lived process here would otherwise hold a dead
+# connection and surface it as a raw 500 (psycopg.errors.AdminShutdown) on
+# whatever request happened to use it next — hit live, repeatedly, across
+# this project's session history (decision_log_claude.md). pre_ping tests
+# each pooled connection with a cheap query before handing it to a request,
+# transparently reconnecting instead of failing the request.
+_engine = create_engine(settings.database_url, pool_pre_ping=True)
 _embedder = SentenceTransformer(settings.embedding_model)
 
 if settings.jwt_signing_secret == DEFAULT_JWT_SIGNING_SECRET:

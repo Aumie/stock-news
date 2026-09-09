@@ -124,8 +124,25 @@ class BackfillService:
                 continue
             any_chunk_succeeded = True
             for article in articles:
-                self._ingest_client.ingest(article, symbol=symbol)
-            total_articles += len(articles)
+                # Real bug found live: processing's /articles/ingest genuinely
+                # 500'd for one article out of an otherwise-successful chunk —
+                # with no guard here, that exception propagated all the way up
+                # and crashed the whole Celery task before trigger_for_symbol
+                # (the price/dbt rebuild) ever ran, even though the symbol's
+                # news fetch itself had succeeded (decision_log_claude.md). One
+                # bad article must be skipped like a failed chunk already is,
+                # not take down everything downstream of it.
+                try:
+                    self._ingest_client.ingest(article, symbol=symbol)
+                except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                    logger.warning(
+                        "backfill_service.article_ingest_failed",
+                        symbol=symbol,
+                        headline=article.headline,
+                        error=str(exc),
+                    )
+                    continue
+                total_articles += 1
             chunk_to = chunk_from
 
         # Only record progress once Finnhub was genuinely reached at least
