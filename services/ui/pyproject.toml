@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
+    "altair>=5.0.0",
     "grpcio>=1.84.0",
     "grpcio-tools>=1.84.0",
     "httpx>=0.28.1",
+    "pandas>=2.0.0",
     "protobuf>=7.36.2",
     "streamlit[auth]>=1.64.0",
 ]

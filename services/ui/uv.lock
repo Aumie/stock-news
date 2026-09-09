@@ -1249,9 +1249,11 @@ name = "ui"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "altair" },
     { name = "grpcio" },
     { name = "grpcio-tools" },
     { name = "httpx" },
+    { name = "pandas" },
     { name = "protobuf" },
     { name = "streamlit", extra = ["auth"] },
 ]
@@ -1263,9 +1265,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "altair", specifier = ">=5.0.0" },
     { name = "grpcio", specifier = ">=1.84.0" },
     { name = "grpcio-tools", specifier = ">=1.84.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pandas", specifier = ">=2.0.0" },
     { name = "protobuf", specifier = ">=7.36.2" },
     { name = "streamlit", extras = ["auth"], specifier = ">=1.64.0" },
 ]

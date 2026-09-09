@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+import altair as alt
+import pandas as pd
 import streamlit as st
 
 from clients.stats_client import StatsAPIClient
@@ -58,6 +60,26 @@ def render() -> None:
             price_rows = [row for row in window_stats["price_deltas"] if row["price_change_pct"] is not None]
             st.write("Day-over-day price change (%)")
             if price_rows:
-                st.bar_chart({row["date"]: row["price_change_pct"] for row in price_rows})
+                # st.bar_chart can't color bars conditionally (one color for
+                # the whole series) — Altair (already a Streamlit dependency)
+                # gives per-bar color via a field encoding instead.
+                price_df = pd.DataFrame(price_rows)
+                price_df["direction"] = price_df["price_change_pct"].apply(
+                    lambda pct: "Up" if pct >= 0 else "Down"
+                )
+                chart = (
+                    alt.Chart(price_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("date:O", title="Date"),
+                        y=alt.Y("price_change_pct:Q", title="Price change (%)"),
+                        color=alt.Color(
+                            "direction:N",
+                            scale=alt.Scale(domain=["Up", "Down"], range=["#26a69a", "#ef5350"]),
+                            legend=None,
+                        ),
+                    )
+                )
+                st.altair_chart(chart, use_container_width=True)
             else:
                 st.caption("No data yet — this fills in once the daily batch job has run at least once.")

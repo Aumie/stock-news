@@ -308,6 +308,13 @@ User asked for a critical pass over the codebase for smelly/unsound decisions. S
 - **TDD**: new `tests/infrastructure/test_celery_app_retry.py` — asserts `autoretry_for`/`retry_backoff`/`max_retries` are configured on both tasks, and that the underlying task function still raises `OperationalError` (not swallows it) when the wrapped `BackfillService` call fails, confirming Celery's retry machinery — not application code — owns the retry behavior.
 - All 114 query-api tests pass (up from 110 — 4 new retry-config tests).
 
+## Stats page: day-over-day price change bars colored green/red by direction (user request)
+
+- **User's exact request**: "can u add price change color green red?" for the "Day-over-day price change (%)" chart on the Stats page.
+- **`st.bar_chart` can't do this** — it takes one color for the whole series, no per-bar conditional styling. Switched that one chart to `st.altair_chart` with a `color` encoding keyed on a derived `direction` (`"Up"`/`"Down"`) field — Altair is already a transitive Streamlit dependency (Streamlit's own native charts are built on it), so this adds no new runtime behavior risk, just makes the dependency explicit (`altair`, `pandas` added to `pyproject.toml` since both are now imported directly rather than only used internally by Streamlit).
+- Colors: teal/green `#26a69a` for ≥0%, red `#ef5350` for negative — standard finance-chart convention, not the project's own color scheme (there wasn't one to match). The rolling-volume line chart above it is untouched (`st.line_chart`), since "up good / down bad" coloring doesn't apply to a volume metric.
+- All 11 UI tests pass (one timeout on `test_navigation.py` during the full-suite run turned out to be a flaky `AppTest` script-runner timeout, not a regression — passed both in isolation and on a full-suite rerun).
+
 ## Real bug reported live: "Articles ingested today" ballooned to a symbol's entire article history after a backfill re-run
 
 - **User's exact report**: "Articles ingested today 1624 ???? shouldnt be only today published from symbols we added?" — with only NVDA and UBER watched, 1624 turned out to be every single article in the entire database, not a plausible single day's news volume.
