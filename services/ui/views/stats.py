@@ -47,10 +47,10 @@ def render() -> None:
             st.metric(f"Total ingestion (past {choice}d)", window_stats["total_articles"])
 
             volume_rows = window_stats["rolling_volume"]
-            st.write(f"Rolling article volume ({choice}d window)")
+            st.write(f"Daily article volume ({choice}d window)")
             if volume_rows:
                 st.line_chart(
-                    {row["date"]: row["rolling_avg"] for row in volume_rows},
+                    {row["date"]: row["articles_today"] for row in volume_rows},
                 )
             else:
                 st.caption("No data yet — this fills in once the daily batch job has run at least once.")

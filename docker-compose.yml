@@ -141,6 +141,30 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  celery-beat:
+    # Schedules daily_batch_sweep every 24h (infrastructure/celery_app.py's
+    # beat_schedule) — the real fix for daily_symbol_features going missing
+    # after a container restart with nothing to rebuild it: previously the
+    # only trigger for the daily-batch job was a watchlist-add event, so a
+    # dropped/failed table stayed missing until a symbol was next added
+    # (decision_log_claude.md). Separate container from celery-worker
+    # because Beat's job is only to enqueue on a schedule, not to execute —
+    # celery-worker still does the actual docker-compose-run work.
+    build: ./services/query-api
+    command: ["uv", "run", "celery", "-A", "infrastructure.celery_app", "beat", "--loglevel=info"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/stock-news
+      FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+      PROCESSING_URL: http://processing:8001
+      LOG_ENV: dev
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672//
+      COMPOSE_PROJECT_NAME: stock-news
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
   auth:
     build: ./services/auth
     ports:

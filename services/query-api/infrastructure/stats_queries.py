@@ -119,8 +119,13 @@ class StatsQueries:
     def overview_stats(self, symbols: list[str]) -> OverviewStats:
         # Real-time counts against `articles`/`article_symbols` directly —
         # deliberately not from daily_symbol_features, which only updates
-        # once a day (§4.6) and would make "articles ingested today" stale
-        # until the next batch run.
+        # once a day (§4.6) and would make this stale until the next batch
+        # run. Filters on published_at, not ingested_at — a real bug found
+        # live: a 30-day backfill re-run inserts old news with ingested_at
+        # set to right now, so counting by ingested_at made this balloon to
+        # a symbol's entire article history any time a backfill was
+        # re-triggered, not just genuinely new same-day news
+        # (decision_log_claude.md).
         if not symbols:
             return OverviewStats(articles_ingested_today=0, tickers_tracked=0)
 
@@ -132,7 +137,7 @@ class StatsQueries:
                     FROM articles a
                     JOIN article_symbols s ON s.article_id = a.id
                     WHERE s.symbol = ANY(:symbols)
-                      AND a.ingested_at >= date_trunc('day', now())
+                      AND a.published_at >= date_trunc('day', now())
                     """
                 ),
                 {"symbols": symbols},

@@ -47,7 +47,7 @@ One HTTP endpoint, triggered only by Cloud Scheduler every minute (§4.2).
 | **Auth** | `roles/run.invoker` granted only to Cloud Scheduler's service account (§6, §10.5) — attached automatically by Scheduler's OIDC config, no application code needed |
 | **Request body** | none |
 | **Response** | `200 OK` on a completed poll cycle (success or partial success — a single symbol's fetch failing doesn't fail the whole cycle); `5xx` only on a hard failure before any polling started |
-| **Side effects** | reads `watchlist` (Postgres), calls Finnhub + Marketaux, publishes to Pub/Sub, writes raw payloads to GCS (§4.2, §6) |
+| **Side effects** | reads `watchlist` (Postgres), calls Finnhub + Marketaux, publishes to Pub/Sub (§4.2, §6) |
 | **Not designed for v1** | no liveness/health signal beyond this response code — §11's "Acknowledged gaps" list |
 
 ---

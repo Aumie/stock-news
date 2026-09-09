@@ -267,4 +267,47 @@ def test_overview_stats_scoped_to_watched_symbols(engine, seeded_articles):
     overview = stats.overview_stats(["TESTSYM"])
 
     assert overview.articles_ingested_today == 2  # the two today-TESTSYM articles, not TESTSYM2's or yesterday's
+
+
+@pytest.fixture()
+def seeded_backfilled_article(engine):
+    # Real bug found live: a 30-day backfill re-run inserts old news with
+    # published_at weeks in the past but ingested_at == right now (the
+    # backfill call itself happened today) — counting by ingested_at made
+    # "Articles ingested today" balloon to the symbol's entire article
+    # history (1624) every time a backfill was re-triggered, not just
+    # genuinely new same-day news (decision_log_claude.md).
+    now = datetime.now(timezone.utc)
+    article_id = str(uuid.uuid4())
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO articles (id, source, headline, published_at, ingested_at, canonical_url, normalized_headline)
+                VALUES (CAST(:id AS uuid), 'finnhub', 'old news backfilled today', :published_at, :ingested_at, :url, 'old news backfilled today')
+                """
+            ),
+            {
+                "id": article_id,
+                "published_at": now - timedelta(days=25),
+                "ingested_at": now,
+                "url": f"https://example.com/{article_id}",
+            },
+        )
+        conn.execute(
+            text("INSERT INTO article_symbols (article_id, symbol) VALUES (CAST(:id AS uuid), 'TESTSYM')"),
+            {"id": article_id},
+        )
+    yield article_id
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM article_symbols WHERE article_id = CAST(:id AS uuid)"), {"id": article_id})
+        conn.execute(text("DELETE FROM articles WHERE id = CAST(:id AS uuid)"), {"id": article_id})
+
+
+def test_overview_stats_excludes_backfilled_old_news_ingested_today(engine, seeded_backfilled_article):
+    stats = StatsQueries(engine)
+
+    overview = stats.overview_stats(["TESTSYM"])
+
+    assert overview.articles_ingested_today == 0
     assert overview.tickers_tracked == 1
