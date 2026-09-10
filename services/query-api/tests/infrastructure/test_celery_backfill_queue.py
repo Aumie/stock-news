@@ -19,3 +19,12 @@ def test_enqueue_symbols_backfill_sends_the_backfill_symbols_older_task():
     queue.enqueue_symbols_backfill(["AAPL", "MSFT"])
 
     celery_app.send_task.assert_called_once_with("backfill_symbols_older", args=[["AAPL", "MSFT"]], queue="backfill")
+
+
+def test_enqueue_symbol_news_ingested_sends_the_symbol_news_ingested_task():
+    celery_app = MagicMock()
+    queue = CeleryBackfillQueue(celery_app)
+
+    queue.enqueue_symbol_news_ingested("AAPL")
+
+    celery_app.send_task.assert_called_once_with("symbol_news_ingested", args=["AAPL"], queue="backfill")

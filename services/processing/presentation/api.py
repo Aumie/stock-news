@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import structlog
 from fastapi import FastAPI
 from sqlalchemy import create_engine
@@ -10,6 +11,7 @@ from infrastructure.dedup_precheck import PostgresDedupPrecheck
 from infrastructure.embeddings import SentenceTransformerEmbedder
 from infrastructure.logging import configure_logging
 from infrastructure.pubsub import PubSubPushEnvelope, parse_push_envelope
+from infrastructure.query_api_notifier import QueryApiNotifier
 from infrastructure.settings import Settings
 from infrastructure.unit_of_work import PostgresUnitOfWork
 from presentation.ingest_api import build_ingest_router
@@ -21,11 +23,13 @@ logger = structlog.get_logger()
 app = FastAPI(title="processing")
 
 _engine = create_engine(settings.database_url)
+_query_api_http_client = httpx.Client(timeout=5.0)
 _use_case = ProcessArticleUseCase(
     uow_factory=lambda: PostgresUnitOfWork(_engine),
     dedup_precheck=PostgresDedupPrecheck(_engine),
     chunker=FixedSizeChunker(),
     embedder=SentenceTransformerEmbedder(settings.embedding_model),
+    news_ingested_notifier=QueryApiNotifier(http_client=_query_api_http_client, base_url=settings.query_api_url),
 )
 
 

@@ -7,3 +7,4 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/stock-news"
     embedding_model: str = "all-MiniLM-L6-v2"
     log_env: str = "dev"
+    query_api_url: str = "http://query-api:8002"

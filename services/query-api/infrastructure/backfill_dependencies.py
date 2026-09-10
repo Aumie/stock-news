@@ -5,9 +5,11 @@ import structlog
 from sqlalchemy import create_engine
 
 from application.backfill_service import BackfillService
+from application.rebuild_debounce_service import RebuildDebounceService
 from infrastructure.finnhub_news_client import FinnhubNewsClient
 from infrastructure.local_docker_job_trigger import LocalDockerJobTrigger
 from infrastructure.postgres_backfill_repo import PostgresBackfillProgressRepo
+from infrastructure.postgres_rebuild_debounce_repo import PostgresRebuildDebounceRepo
 from infrastructure.processing_ingest_client import ProcessingIngestClient
 from infrastructure.settings import Settings
 from infrastructure.system_clock import SystemClock
@@ -48,3 +50,23 @@ def build_job_trigger(settings: Settings) -> LocalDockerJobTrigger | None:
         "sweep will still pick them up)"
     )
     return None
+
+
+def build_rebuild_debounce_service(settings: Settings, job_trigger: LocalDockerJobTrigger | None) -> RebuildDebounceService | None:
+    """Wires the "new news triggers a rebuild, but not more than once an hour
+    per symbol" path (user request) — a symbol sitting on the watchlist keeps
+    getting news from the poller long after it was added, and the only
+    rebuild trigger before this was a 24h sweep or the one-time on-add
+    trigger, so Stats could silently lag the live article count for up to a
+    day (decision_log_claude.md). None when there's no job trigger to
+    actually call, matching build_job_trigger's own degrade-gracefully
+    pattern.
+    """
+    if job_trigger is None:
+        return None
+    engine = create_engine(settings.database_url, pool_pre_ping=True)
+    return RebuildDebounceService(
+        repo=PostgresRebuildDebounceRepo(engine),
+        clock=SystemClock(),
+        trigger=job_trigger,
+    )

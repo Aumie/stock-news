@@ -6,7 +6,11 @@ from celery.signals import beat_init
 from kombu import Queue
 from sqlalchemy.exc import OperationalError
 
-from infrastructure.backfill_dependencies import build_backfill_service, build_job_trigger
+from infrastructure.backfill_dependencies import (
+    build_backfill_service,
+    build_job_trigger,
+    build_rebuild_debounce_service,
+)
 from infrastructure.logging import configure_logging
 from infrastructure.settings import Settings
 
@@ -52,6 +56,7 @@ celery_app.conf.beat_schedule = {
 # request.
 _backfill_service = build_backfill_service(settings)
 _job_trigger = build_job_trigger(settings)
+_rebuild_debounce_service = build_rebuild_debounce_service(settings, _job_trigger)
 
 
 # Real bug found live: a Postgres restart mid-task (recurring Docker Desktop
@@ -99,6 +104,24 @@ def daily_batch_sweep_task() -> None:
     if _job_trigger is not None:
         _job_trigger.trigger_full_sweep()
     logger.info("celery.daily_batch_sweep.complete")
+
+
+@celery_app.task(
+    name="symbol_news_ingested",
+    autoretry_for=(OperationalError,),
+    retry_backoff=True,
+    max_retries=3,
+)
+def symbol_news_ingested_task(symbol: str) -> None:
+    # Triggered by processing after every successful ingest (user request:
+    # "if there is new news from polling it should trigger so it match the
+    # number") — debounced to at most once per hour per symbol so a burst of
+    # articles (a real one hit TSLA: 6 articles in ~14 minutes) doesn't turn
+    # into a burst of full-table dbt rebuilds (decision_log_claude.md).
+    if _rebuild_debounce_service is None:
+        return
+    triggered = _rebuild_debounce_service.notify_symbol_has_new_news(symbol)
+    logger.info("celery.symbol_news_ingested.handled", symbol=symbol, triggered=triggered)
 
 
 @beat_init.connect

@@ -77,3 +77,15 @@ CREATE TABLE symbol_backfill_progress (
     symbol TEXT PRIMARY KEY,
     earliest_backfilled_date DATE NOT NULL
 );
+
+-- Debounce state for the "new news triggers a daily_symbol_features
+-- rebuild" path (user request): processing calls query-api after every
+-- successful ingest, but a full dbt rebuild per article would run far too
+-- often under real news volume — this tracks the last time each symbol's
+-- rebuild actually fired, so a fresh trigger only re-fires once the cooldown
+-- has elapsed, no matter how many articles arrived in between
+-- (decision_log_claude.md).
+CREATE TABLE symbol_rebuild_debounce (
+    symbol TEXT PRIMARY KEY,
+    last_triggered_at TIMESTAMPTZ NOT NULL
+);

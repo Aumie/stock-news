@@ -18,3 +18,6 @@ class CeleryBackfillQueue:
 
     def enqueue_symbols_backfill(self, symbols: list[str]) -> None:
         self._celery_app.send_task("backfill_symbols_older", args=[symbols], queue="backfill")
+
+    def enqueue_symbol_news_ingested(self, symbol: str) -> None:
+        self._celery_app.send_task("symbol_news_ingested", args=[symbol], queue="backfill")

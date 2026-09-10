@@ -22,6 +22,7 @@ from infrastructure.settings import DEFAULT_JWT_SIGNING_SECRET, Settings
 from infrastructure.stats_queries import StatsQueries
 from infrastructure.stub_llm import StubLLMClient
 from presentation.feed_api import build_feed_router
+from presentation.internal_api import build_internal_router
 from presentation.query_api import build_query_router
 from presentation.stats_api import build_stats_router
 from presentation.watchlist_api import build_watchlist_router
@@ -92,6 +93,7 @@ app.include_router(
     )
 )
 app.include_router(build_stats_router(StatsQueries(_engine), _watchlist_service, secret=settings.jwt_signing_secret))
+app.include_router(build_internal_router(_backfill_queue))
 
 
 @app.get("/health")

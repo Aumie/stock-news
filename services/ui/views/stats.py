@@ -29,7 +29,15 @@ def render() -> None:
 
     overview = stats["overview"]
     col1, col2 = st.columns(2)
-    col1.metric("Articles ingested today", overview["articles_ingested_today"])
+    col1.metric(
+        "Articles ingested today",
+        overview["articles_ingested_today"],
+        help=(
+            "This number is live. The charts below read from a daily snapshot "
+            "that can lag up to an hour behind for a symbol with fresh news, "
+            "or up to 24h if nothing has triggered a refresh recently."
+        ),
+    )
     col2.metric("Tickers tracked", overview["tickers_tracked"])
 
     if not stats["by_symbol"]:

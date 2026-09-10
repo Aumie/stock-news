@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from domain.article import Article
 from domain.dedup import content_hash, fuzzy_key
 from domain.repository import ArticleRepository, Chunker, DedupPrecheck, Embedder, UnitOfWorkFactory
+
+
+class NewsIngestedNotifier(Protocol):
+    def notify_symbol_news_ingested(self, symbol: str) -> None: ...
 
 
 class ProcessArticleUseCase:
@@ -12,11 +18,13 @@ class ProcessArticleUseCase:
         dedup_precheck: DedupPrecheck,
         chunker: Chunker,
         embedder: Embedder,
+        news_ingested_notifier: NewsIngestedNotifier | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._dedup_precheck = dedup_precheck
         self._chunker = chunker
         self._embedder = embedder
+        self._news_ingested_notifier = news_ingested_notifier
 
     def process(self, article: Article, symbol: str) -> str:
         # Two-phase: a cheap, read-only dedup check first (outside any
@@ -32,6 +40,7 @@ class ProcessArticleUseCase:
         if existing_id is not None:
             with self._uow_factory() as uow:
                 uow.repo.add_symbol(existing_id, symbol)
+            self._notify_symbol_news_ingested(symbol)
             return existing_id
 
         chunks = self._chunker.chunk(article.content)
@@ -42,7 +51,18 @@ class ProcessArticleUseCase:
             uow.repo.add_symbol(article_id, symbol)
             if is_new and chunks:
                 uow.embedding_writer.write(article_id, chunks, vectors)
-            return article_id
+        self._notify_symbol_news_ingested(symbol)
+        return article_id
+
+    def _notify_symbol_news_ingested(self, symbol: str) -> None:
+        # Every successful call means this symbol just gained a new article
+        # association — whether the article itself was brand new or a
+        # cross-source dedup match, the symbol's own news picture changed
+        # either way, so daily_symbol_features may now be stale for it
+        # (user request: "if there is new news from polling it should
+        # trigger so it match the number", decision_log_claude.md).
+        if self._news_ingested_notifier is not None:
+            self._news_ingested_notifier.notify_symbol_news_ingested(symbol)
 
     def _resolve_article(self, repo: ArticleRepository, article: Article) -> tuple[str, bool]:
         if article.canonical_url:

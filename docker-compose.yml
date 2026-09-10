@@ -62,6 +62,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/stock-news
       LOG_ENV: dev
+      QUERY_API_URL: http://query-api:8002
     depends_on:
       postgres:
         condition: service_healthy

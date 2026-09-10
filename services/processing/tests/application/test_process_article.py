@@ -132,6 +132,14 @@ def _article(**overrides) -> Article:
     return Article(**defaults)
 
 
+class FakeNewsIngestedNotifier:
+    def __init__(self) -> None:
+        self.notified_for: list[str] = []
+
+    def notify_symbol_news_ingested(self, symbol: str) -> None:
+        self.notified_for.append(symbol)
+
+
 @pytest.fixture
 def use_case():
     repo = FakeRepo()
@@ -223,6 +231,52 @@ class TestTier3FuzzyCrossSource:
 
         assert ("article-1", "AAPL") in repo.symbols
         assert ("article-1", "MSFT") in repo.symbols
+
+
+class TestNewsIngestedNotifier:
+    def test_notifies_for_a_brand_new_article(self):
+        repo = FakeRepo()
+        notifier = FakeNewsIngestedNotifier()
+        uc = ProcessArticleUseCase(
+            uow_factory=lambda: FakeUnitOfWork(repo, FakeEmbeddingWriter()),
+            dedup_precheck=FakeDedupPrecheck(repo),
+            chunker=FakeChunker(),
+            embedder=FakeEmbedder(),
+            news_ingested_notifier=notifier,
+        )
+        article = _article(canonical_url="https://example.com/1")
+
+        uc.process(article, symbol="AAPL")
+
+        assert notifier.notified_for == ["AAPL"]
+
+    def test_notifies_even_on_a_dedup_match(self):
+        # A cross-symbol/cross-source dedup match still adds a new
+        # (article_id, symbol) association — the symbol's own news picture
+        # changed, so Stats can still be stale for it even though no new
+        # article row or embedding was written.
+        repo = FakeRepo()
+        notifier = FakeNewsIngestedNotifier()
+        uc = ProcessArticleUseCase(
+            uow_factory=lambda: FakeUnitOfWork(repo, FakeEmbeddingWriter()),
+            dedup_precheck=FakeDedupPrecheck(repo),
+            chunker=FakeChunker(),
+            embedder=FakeEmbedder(),
+            news_ingested_notifier=notifier,
+        )
+        a = _article(canonical_url="https://example.com/1")
+        b = _article(canonical_url="https://example.com/1", headline="different headline entirely")
+
+        uc.process(a, symbol="AAPL")
+        uc.process(b, symbol="MSFT")
+
+        assert notifier.notified_for == ["AAPL", "MSFT"]
+
+    def test_does_not_raise_when_no_notifier_is_configured(self, use_case):
+        uc, repo, embedder, writer = use_case
+        article = _article(canonical_url="https://example.com/1")
+
+        uc.process(article, symbol="AAPL")  # does not raise
 
 
 class TestRaceBetweenPrecheckAndTransaction:
