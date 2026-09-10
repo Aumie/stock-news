@@ -250,11 +250,14 @@ class TestNewsIngestedNotifier:
 
         assert notifier.notified_for == ["AAPL"]
 
-    def test_notifies_even_on_a_dedup_match(self):
-        # A cross-symbol/cross-source dedup match still adds a new
-        # (article_id, symbol) association — the symbol's own news picture
-        # changed, so Stats can still be stale for it even though no new
-        # article row or embedding was written.
+    def test_does_not_notify_on_an_exact_dedup_precheck_match(self):
+        # Real bug found live: the poller re-sends the same ~48 articles for
+        # a busy symbol every 60s cycle — each is an exact dedup-precheck
+        # match (same canonical_url already seen), add_symbol's own ON
+        # CONFLICT DO NOTHING is a true no-op, and nothing about the
+        # symbol's news actually changed. Notifying on every one of these
+        # flooded the Celery queue badly enough to starve a real
+        # backfill_symbol task of worker capacity (decision_log_claude.md).
         repo = FakeRepo()
         notifier = FakeNewsIngestedNotifier()
         uc = ProcessArticleUseCase(
@@ -268,9 +271,10 @@ class TestNewsIngestedNotifier:
         b = _article(canonical_url="https://example.com/1", headline="different headline entirely")
 
         uc.process(a, symbol="AAPL")
+        notifier.notified_for.clear()  # only the repeat matters for this test
         uc.process(b, symbol="MSFT")
 
-        assert notifier.notified_for == ["AAPL", "MSFT"]
+        assert notifier.notified_for == []
 
     def test_does_not_raise_when_no_notifier_is_configured(self, use_case):
         uc, repo, embedder, writer = use_case

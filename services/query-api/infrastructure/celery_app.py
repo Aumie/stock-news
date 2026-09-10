@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import httpx
 import structlog
 from celery import Celery
 from celery.signals import beat_init
@@ -67,9 +68,13 @@ _rebuild_debounce_service = build_rebuild_debounce_service(settings, _job_trigge
 # (decision_log_claude.md). autoretry_for only covers this specific
 # transient-infrastructure error, not genuine bugs — those should still
 # surface immediately rather than being retried into a longer failure.
+# httpx.TransportError added after a second, related failure found live: a
+# fresh stack start hit backfill_symbol before `processing` had finished
+# starting up, raising httpx.ConnectError with no retry either — same class
+# of transient-startup-ordering issue, different dependency.
 @celery_app.task(
     name="backfill_symbol",
-    autoretry_for=(OperationalError,),
+    autoretry_for=(OperationalError, httpx.TransportError),
     retry_backoff=True,
     max_retries=3,
 )
@@ -83,7 +88,7 @@ def backfill_symbol_task(symbol: str) -> None:
 
 @celery_app.task(
     name="backfill_symbols_older",
-    autoretry_for=(OperationalError,),
+    autoretry_for=(OperationalError, httpx.TransportError),
     retry_backoff=True,
     max_retries=3,
 )

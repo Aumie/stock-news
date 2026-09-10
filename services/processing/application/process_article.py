@@ -36,11 +36,22 @@ class ProcessArticleUseCase:
         # where a concurrent insert lands between this check and that
         # transaction — in that rare case the just-computed embeddings are
         # simply discarded rather than written (decision_log_claude.md).
+        # Real bug found live: the poller re-sends the same ~48 articles for a
+        # busy symbol every single 60s cycle (Finnhub's "recent news" window
+        # naturally overlaps poll to poll) — every one of those is an exact
+        # dedup-precheck match, `add_symbol`'s own ON CONFLICT DO NOTHING is a
+        # true no-op, and nothing about the symbol's news picture actually
+        # changed. Notifying here anyway flooded the Celery queue with 40-50
+        # symbol_news_ingested tasks/minute per watched symbol, which starved
+        # the worker badly enough that a real backfill_symbol task never got
+        # a chance to run and left a symbol stuck "still backfilling"
+        # indefinitely (decision_log_claude.md). Only the two paths below,
+        # where an article or a new symbol association is genuinely being
+        # written for the first time, represent real news for the symbol.
         existing_id = self._dedup_precheck.find_existing(article)
         if existing_id is not None:
             with self._uow_factory() as uow:
                 uow.repo.add_symbol(existing_id, symbol)
-            self._notify_symbol_news_ingested(symbol)
             return existing_id
 
         chunks = self._chunker.chunk(article.content)

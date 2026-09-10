@@ -37,7 +37,16 @@ class FakeRetriever:
 
     def retrieve(self, symbols, question):
         self.last_symbols = symbols
-        return [RetrievedChunk(article_id="a1", chunk_text="text", source="finnhub", headline="h", score=0.9)]
+        return [
+            RetrievedChunk(
+                article_id="a1",
+                chunk_text="text",
+                source="finnhub",
+                headline="h",
+                score=0.9,
+                published_at=datetime(2026, 9, 18, tzinfo=timezone.utc),
+            )
+        ]
 
 
 class FakeLLM:

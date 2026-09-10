@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 
@@ -16,9 +17,17 @@ def _operational_error() -> OperationalError:
     return OperationalError("SELECT 1", {}, Exception("terminating connection due to administrator command"))
 
 
+def _connect_error() -> httpx.ConnectError:
+    # Mirrors a real error found live: a fresh stack start hit
+    # backfill_symbol before `processing` had finished starting up
+    # (decision_log_claude.md) — a transient startup-ordering blip, not a
+    # bug in the task itself.
+    return httpx.ConnectError("[Errno 111] Connection refused")
+
+
 class TestBackfillSymbolTaskRetriesOnTransientDbError:
     def test_retries_on_operational_error(self) -> None:
-        assert backfill_symbol_task.autoretry_for == (OperationalError,)
+        assert backfill_symbol_task.autoretry_for == (OperationalError, httpx.TransportError)
         assert backfill_symbol_task.retry_backoff is True
         assert backfill_symbol_task.max_retries == 3
 
@@ -28,10 +37,16 @@ class TestBackfillSymbolTaskRetriesOnTransientDbError:
             with pytest.raises(OperationalError):
                 backfill_symbol_task.run("UBER")
 
+    def test_task_raises_connect_error_when_processing_is_unreachable(self) -> None:
+        with patch("infrastructure.celery_app._backfill_service") as mock_service:
+            mock_service.backfill_on_add.side_effect = _connect_error()
+            with pytest.raises(httpx.ConnectError):
+                backfill_symbol_task.run("TSLA")
+
 
 class TestBackfillSymbolsOlderTaskRetriesOnTransientDbError:
     def test_retries_on_operational_error(self) -> None:
-        assert backfill_symbols_older_task.autoretry_for == (OperationalError,)
+        assert backfill_symbols_older_task.autoretry_for == (OperationalError, httpx.TransportError)
         assert backfill_symbols_older_task.retry_backoff is True
         assert backfill_symbols_older_task.max_retries == 3
 

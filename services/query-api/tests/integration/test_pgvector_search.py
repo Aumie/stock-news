@@ -127,3 +127,32 @@ def test_retrieve_scores_are_sorted_descending(engine, embedder, relevant_and_de
 
     scores = [r.score for r in results]
     assert scores == sorted(scores, reverse=True), f"results should be ordered by descending similarity: {scores}"
+
+
+def test_retrieve_includes_canonical_url(engine, embedder, relevant_and_decoy_articles):
+    # Real bug found live: the LLM had no URL in its prompt context at all,
+    # so when asked for an article link it either refused or fabricated one
+    # while claiming "the excerpts include some URLs" — a genuine
+    # hallucination about its own grounding, confirmed by checking
+    # _build_prompt actually never passed a URL (decision_log_claude.md).
+    relevant_id, _ = relevant_and_decoy_articles
+    retriever = PgVectorRetriever(engine, embedder, top_k=3)
+
+    results = retriever.retrieve(symbols=["TESTSYM"], question="What did Apple announce about the iPhone?")
+
+    relevant_result = next(r for r in results if r.article_id == relevant_id)
+    assert relevant_result.canonical_url == f"https://example.com/{relevant_id}"
+
+
+def test_retrieve_includes_published_at(engine, embedder, relevant_and_decoy_articles):
+    # Same gap as canonical_url, for dates: without published_at in the
+    # prompt, the model correctly (but unhelpfully) said it couldn't answer
+    # timing questions like "any consecutive news in a week?"
+    # (decision_log_claude.md).
+    relevant_id, _ = relevant_and_decoy_articles
+    retriever = PgVectorRetriever(engine, embedder, top_k=3)
+
+    results = retriever.retrieve(symbols=["TESTSYM"], question="What did Apple announce about the iPhone?")
+
+    relevant_result = next(r for r in results if r.article_id == relevant_id)
+    assert relevant_result.published_at is not None

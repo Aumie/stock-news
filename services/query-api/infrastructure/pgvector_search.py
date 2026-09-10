@@ -23,7 +23,7 @@ class PgVectorRetriever:
                 text(
                     """
                     SELECT
-                        e.article_id, e.chunk_text, a.source, a.headline,
+                        e.article_id, e.chunk_text, a.source, a.headline, a.canonical_url, a.published_at,
                         1 - (e.vector <=> :query_vector) AS score
                     FROM embeddings e
                     JOIN articles a ON a.id = e.article_id
@@ -43,6 +43,8 @@ class PgVectorRetriever:
                 source=row.source,
                 headline=row.headline,
                 score=float(row.score),
+                published_at=row.published_at,
+                canonical_url=row.canonical_url,
             )
             for row in rows
         ]

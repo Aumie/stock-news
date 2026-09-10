@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/stock-news"
     embedding_model: str = "all-MiniLM-L6-v2"
     anthropic_api_key: str = ""
-    llm_model: str = "claude-haiku-4-5-20251001"
+    llm_model: str = "claude-haiku-4-5"
     jwt_signing_secret: str = DEFAULT_JWT_SIGNING_SECRET
     finnhub_api_key: str = ""
     processing_url: str = "http://localhost:8001"
