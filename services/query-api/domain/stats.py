@@ -25,3 +25,10 @@ class PriceDelta:
 class OverviewStats:
     articles_ingested_today: int
     tickers_tracked: int
+
+
+@dataclass(frozen=True)
+class BusiestSymbolDay:
+    symbol: str
+    date: date
+    article_count: int

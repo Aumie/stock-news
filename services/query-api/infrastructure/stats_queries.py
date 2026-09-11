@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-from domain.stats import OverviewStats, PriceDelta, RollingVolumePoint
+from domain.stats import BusiestSymbolDay, OverviewStats, PriceDelta, RollingVolumePoint
 
 
 class StatsQueries:
@@ -143,3 +143,33 @@ class StatsQueries:
                 {"symbols": symbols},
             ).fetchone()
         return OverviewStats(articles_ingested_today=row.articles_today, tickers_tracked=len(symbols))
+
+    def busiest_symbol_day(self, symbols: list[str]) -> BusiestSymbolDay | None:
+        """Which watched symbol had the most articles published on a single
+        day, and how many. Queries `articles`/`article_symbols` directly
+        (like `overview_stats`) rather than `daily_symbol_features` — that
+        table is only as fresh as the last daily-batch run and can go
+        missing entirely after a Postgres restart with nothing to rebuild it
+        (decision_log_claude.md), so a real-time count from the source
+        tables is the more reliable answer for an ad-hoc question like this.
+        """
+        if not symbols:
+            return None
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT s.symbol, a.published_at::date AS day, COUNT(*) AS article_count
+                    FROM articles a
+                    JOIN article_symbols s ON s.article_id = a.id
+                    WHERE s.symbol = ANY(:symbols)
+                    GROUP BY s.symbol, day
+                    ORDER BY article_count DESC
+                    LIMIT 1
+                    """
+                ),
+                {"symbols": symbols},
+            ).fetchone()
+        if row is None:
+            return None
+        return BusiestSymbolDay(symbol=row.symbol, date=row.day, article_count=row.article_count)

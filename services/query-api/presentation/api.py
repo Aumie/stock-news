@@ -56,7 +56,8 @@ else:
     logger.warning("ANTHROPIC_API_KEY not set — using stub LLM, no real answers will be generated")
     _llm = StubLLMClient()
 
-_query_service = QueryService(retriever=PgVectorRetriever(_engine, _embedder), llm=_llm)
+_stats_queries = StatsQueries(_engine)
+_query_service = QueryService(retriever=PgVectorRetriever(_engine, _embedder), llm=_llm, aggregate_queries=_stats_queries)
 
 _finnhub_http_client = httpx.Client(timeout=10.0)
 
@@ -92,7 +93,7 @@ app.include_router(
         backfill_queue=_backfill_queue,
     )
 )
-app.include_router(build_stats_router(StatsQueries(_engine), _watchlist_service, secret=settings.jwt_signing_secret))
+app.include_router(build_stats_router(_stats_queries, _watchlist_service, secret=settings.jwt_signing_secret))
 app.include_router(build_internal_router(_backfill_queue))
 
 

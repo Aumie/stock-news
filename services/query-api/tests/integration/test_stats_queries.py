@@ -311,3 +311,80 @@ def test_overview_stats_excludes_backfilled_old_news_ingested_today(engine, seed
 
     assert overview.articles_ingested_today == 0
     assert overview.tickers_tracked == 1
+
+
+@pytest.fixture()
+def seeded_busiest_day_articles(engine):
+    # User's exact question: "what symbol have most news in a day?" — a
+    # real aggregate query the RAG chat couldn't answer (top-5 semantic
+    # retrieval isn't built for counting across the whole dataset), so this
+    # is answered with real SQL instead (decision_log_claude.md). TESTSYM
+    # gets 3 articles on one day (the busiest), TESTSYM2 gets 2 on another
+    # day and 1 on a third — TESTSYM's single day must win regardless of
+    # its total across days.
+    now = datetime.now(timezone.utc)
+    busy_day = now - timedelta(days=2)
+    other_day = now - timedelta(days=5)
+    another_day = now - timedelta(days=6)
+    ids = []
+    for headline, symbol, published_at in [
+        ("busy 1", "TESTSYM", busy_day),
+        ("busy 2", "TESTSYM", busy_day),
+        ("busy 3", "TESTSYM", busy_day),
+        ("other 1", "TESTSYM2", other_day),
+        ("other 2", "TESTSYM2", other_day),
+        ("another 1", "TESTSYM2", another_day),
+    ]:
+        article_id = str(uuid.uuid4())
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO articles (id, source, headline, published_at, ingested_at, canonical_url, normalized_headline)
+                    VALUES (CAST(:id AS uuid), 'finnhub', :headline, :published_at, now(), :url, :normalized)
+                    """
+                ),
+                {
+                    "id": article_id,
+                    "headline": headline,
+                    "published_at": published_at,
+                    "url": f"https://example.com/{article_id}",
+                    "normalized": headline.lower(),
+                },
+            )
+            conn.execute(
+                text("INSERT INTO article_symbols (article_id, symbol) VALUES (CAST(:id AS uuid), :symbol)"),
+                {"id": article_id, "symbol": symbol},
+            )
+        ids.append(article_id)
+    yield ids
+    with engine.begin() as conn:
+        for article_id in ids:
+            conn.execute(text("DELETE FROM article_symbols WHERE article_id = CAST(:id AS uuid)"), {"id": article_id})
+            conn.execute(text("DELETE FROM articles WHERE id = CAST(:id AS uuid)"), {"id": article_id})
+
+
+def test_busiest_symbol_day_returns_the_symbol_and_date_with_the_most_articles(engine, seeded_busiest_day_articles):
+    stats = StatsQueries(engine)
+
+    busiest = stats.busiest_symbol_day(["TESTSYM", "TESTSYM2"])
+
+    assert busiest is not None
+    assert busiest.symbol == "TESTSYM"
+    assert busiest.article_count == 3
+
+
+def test_busiest_symbol_day_scoped_to_watched_symbols(engine, seeded_busiest_day_articles):
+    stats = StatsQueries(engine)
+
+    busiest = stats.busiest_symbol_day(["TESTSYM2"])  # TESTSYM excluded
+
+    assert busiest is not None
+    assert busiest.symbol == "TESTSYM2"
+    assert busiest.article_count == 2
+
+
+def test_busiest_symbol_day_returns_none_for_no_symbols(engine):
+    stats = StatsQueries(engine)
+
+    assert stats.busiest_symbol_day([]) is None
