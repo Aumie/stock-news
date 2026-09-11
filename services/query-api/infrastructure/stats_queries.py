@@ -3,7 +3,16 @@ from __future__ import annotations
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
-from domain.stats import BusiestSymbolDay, OverviewStats, PriceDelta, RollingVolumePoint
+from domain.stats import ArticleListing, BusiestSymbolDay, OverviewStats, PriceDelta, RollingVolumePoint
+
+# Caps how many articles a "list all" question can pull into the LLM prompt
+# — a genuinely busy symbol/day can have 60+ articles (GOOG hit 66 live this
+# session), and feeding every one of those into the prompt is expensive and
+# not what a user asking to "see" the news actually needs. The response
+# still tells the model (and therefore the user) the real total count
+# separately, so this cap is never silently misleading about how much news
+# exists (decision_log_claude.md).
+MAX_ARTICLE_LISTING = 30
 
 
 class StatsQueries:
@@ -173,3 +182,48 @@ class StatsQueries:
         if row is None:
             return None
         return BusiestSymbolDay(symbol=row.symbol, date=row.day, article_count=row.article_count)
+
+    def list_articles(self, symbols: list[str]) -> tuple[list[ArticleListing], int]:
+        """Every matching article's headline/source/date/link, most recent
+        first, capped at MAX_ARTICLE_LISTING — plus the real total count so
+        a capped response never silently understates how much news exists.
+        Real-time against `articles` directly, same reasoning as
+        `overview_stats`/`busiest_symbol_day`.
+        """
+        if not symbols:
+            return ([], 0)
+        with self._engine.begin() as conn:
+            total = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(DISTINCT a.id) AS total
+                    FROM articles a
+                    JOIN article_symbols s ON s.article_id = a.id
+                    WHERE s.symbol = ANY(:symbols)
+                    """
+                ),
+                {"symbols": symbols},
+            ).scalar_one()
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT a.headline, a.source, a.published_at, a.canonical_url
+                    FROM articles a
+                    JOIN article_symbols s ON s.article_id = a.id
+                    WHERE s.symbol = ANY(:symbols)
+                    ORDER BY a.published_at DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"symbols": symbols, "limit": MAX_ARTICLE_LISTING},
+            ).fetchall()
+        articles = [
+            ArticleListing(
+                headline=row.headline,
+                source=row.source,
+                published_at=row.published_at,
+                canonical_url=row.canonical_url,
+            )
+            for row in rows
+        ]
+        return (articles, int(total))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 
 @dataclass(frozen=True)
@@ -32,3 +32,11 @@ class BusiestSymbolDay:
     symbol: str
     date: date
     article_count: int
+
+
+@dataclass(frozen=True)
+class ArticleListing:
+    headline: str
+    source: str
+    published_at: datetime
+    canonical_url: str | None

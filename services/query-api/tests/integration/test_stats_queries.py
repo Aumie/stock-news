@@ -388,3 +388,47 @@ def test_busiest_symbol_day_returns_none_for_no_symbols(engine):
     stats = StatsQueries(engine)
 
     assert stats.busiest_symbol_day([]) is None
+
+
+def test_list_articles_returns_matching_articles_most_recent_first(engine, seeded_busiest_day_articles):
+    # User's follow-up after the busiest-symbol-day feature: "give me all 66
+    # articles" then "cant we have it query all that?" — RAG retrieval only
+    # ever returns its top-5 semantically similar chunks, so a genuine
+    # listing question needs a real SQL fetch of every matching article,
+    # not vector search (decision_log_claude.md).
+    stats = StatsQueries(engine)
+
+    articles, total = stats.list_articles(["TESTSYM"])
+
+    assert total == 3
+    assert len(articles) == 3
+    assert all(a.headline.startswith("busy") for a in articles)
+    published_dates = [a.published_at for a in articles]
+    assert published_dates == sorted(published_dates, reverse=True)
+
+
+def test_list_articles_scoped_to_watched_symbols(engine, seeded_busiest_day_articles):
+    stats = StatsQueries(engine)
+
+    articles, total = stats.list_articles(["TESTSYM2"])
+
+    assert total == 3  # TESTSYM2's 2 + 1, not TESTSYM's 3
+    assert all(a.headline.startswith(("other", "another")) for a in articles)
+
+
+def test_list_articles_reports_real_total_even_when_capped(engine, seeded_busiest_day_articles, monkeypatch):
+    import infrastructure.stats_queries as stats_queries_module
+
+    monkeypatch.setattr(stats_queries_module, "MAX_ARTICLE_LISTING", 1)
+    stats = StatsQueries(engine)
+
+    articles, total = stats.list_articles(["TESTSYM"])
+
+    assert len(articles) == 1  # capped
+    assert total == 3  # but the real total is still reported
+
+
+def test_list_articles_returns_empty_for_no_symbols(engine):
+    stats = StatsQueries(engine)
+
+    assert stats.list_articles([]) == ([], 0)

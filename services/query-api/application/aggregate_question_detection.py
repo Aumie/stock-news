@@ -19,3 +19,20 @@ _AGGREGATE_PATTERN = re.compile(
 
 def is_busiest_symbol_question(question: str) -> bool:
     return bool(_AGGREGATE_PATTERN.search(question))
+
+
+# User's exact follow-up: "give me all 66 articles" then "cant we have it
+# query all that?" — RAG retrieval only ever returns its top-k most
+# semantically similar chunks (5 here), so it correctly refused to invent
+# the other 61 rather than pretend it had them (decision_log_claude.md). A
+# question asking to list/enumerate everything is a different shape from
+# both an ordinary content question and a count/aggregate question — routed
+# to a real SQL fetch of every matching article instead of vector retrieval.
+_LIST_ALL_PATTERN = re.compile(
+    r"\b(all|every|list|complete list)\b.*\b(news|article|articles)\b",
+    re.IGNORECASE,
+)
+
+
+def is_list_all_articles_question(question: str) -> bool:
+    return bool(_LIST_ALL_PATTERN.search(question))
