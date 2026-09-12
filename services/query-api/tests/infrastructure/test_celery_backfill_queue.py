@@ -28,3 +28,12 @@ def test_enqueue_symbol_news_ingested_sends_the_symbol_news_ingested_task():
     queue.enqueue_symbol_news_ingested("AAPL")
 
     celery_app.send_task.assert_called_once_with("symbol_news_ingested", args=["AAPL"], queue="backfill")
+
+
+def test_enqueue_daily_batch_sweep_sends_the_daily_batch_sweep_task():
+    celery_app = MagicMock()
+    queue = CeleryBackfillQueue(celery_app)
+
+    queue.enqueue_daily_batch_sweep()
+
+    celery_app.send_task.assert_called_once_with("daily_batch_sweep", queue="backfill")

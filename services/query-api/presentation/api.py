@@ -4,7 +4,7 @@ import httpx
 import structlog
 from fastapi import FastAPI
 from sentence_transformers import SentenceTransformer
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 
 from application.query_service import QueryService
 from application.watchlist_service import WatchlistService
@@ -95,6 +95,23 @@ app.include_router(
 )
 app.include_router(build_stats_router(_stats_queries, _watchlist_service, secret=settings.jwt_signing_secret))
 app.include_router(build_internal_router(_backfill_queue))
+
+
+@app.on_event("startup")
+def _trigger_sweep_if_daily_symbol_features_missing() -> None:
+    # Real recurring gap found live: celery-beat's own beat_init hook
+    # already self-heals a missing daily_symbol_features table on its own
+    # startup (celery_app.py), but that only covers celery-beat restarting —
+    # query-api coming up on its own (a plain redeploy, or celery-beat
+    # staying up the whole time while Postgres/the table got wiped
+    # underneath it) left Stats stuck on "No data yet" with nothing to
+    # notice (decision_log_claude.md: this table went missing repeatedly
+    # this session after every Docker Desktop event). Checking here too
+    # means the check runs wherever the app actually starts, not just one
+    # specific process.
+    if not inspect(_engine).has_table("daily_symbol_features"):
+        logger.warning("api.daily_symbol_features_missing_on_startup — enqueuing a sweep to rebuild it")
+        _backfill_queue.enqueue_daily_batch_sweep()
 
 
 @app.get("/health")

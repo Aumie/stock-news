@@ -21,3 +21,6 @@ class CeleryBackfillQueue:
 
     def enqueue_symbol_news_ingested(self, symbol: str) -> None:
         self._celery_app.send_task("symbol_news_ingested", args=[symbol], queue="backfill")
+
+    def enqueue_daily_batch_sweep(self) -> None:
+        self._celery_app.send_task("daily_batch_sweep", queue="backfill")
