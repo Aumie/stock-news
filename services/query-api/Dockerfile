@@ -7,7 +7,28 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
+# Bake the embedding model into the image at build time — real deploy
+# failure found live on Cloud Run: a cold-start container downloading this
+# from HuggingFace hit a 429 rate limit (repeated redeploys this session
+# apparently tripped it), and the resulting ~274s backoff blew past Cloud
+# Run's startup health-check timeout entirely (decision_log_claude.md). This
+# runs at build time, not container start, so the deployed container never
+# calls out to HuggingFace at all. HF_HOME is pinned inside /app (rather than
+# root's default ~/.cache) so the chown below actually covers it — appuser
+# needs read access to the cached weights at runtime, not just root.
+ENV HF_HOME=/app/.cache/huggingface
+RUN uv run python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+# Real gap found live: baking the model in wasn't enough on its own —
+# sentence-transformers/huggingface_hub still makes HEAD requests to check
+# for metadata updates at runtime by default, even with the model already
+# cached, and those still hit the same 429 rate limit and its multi-minute
+# backoff. HF_HUB_OFFLINE forces the library to use the local cache
+# unconditionally, with zero network calls, once the weights are baked in.
+ENV HF_HUB_OFFLINE=1
+
 COPY . .
+RUN chmod +x celery_worker_entrypoint.sh
 
 # Docker CLI + compose plugin, local-dev only — LocalDockerJobTrigger shells
 # out to `docker compose run` via the socket mounted in docker-compose.yml.

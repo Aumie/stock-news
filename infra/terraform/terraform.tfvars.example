@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored, never committed) and fill in the
+# real value. Only used for db_schema_init.tf's one-time schema init against
+# the real Supabase Postgres instance — never referenced by any other
+# resource, and never written into Terraform's own state as plaintext
+# beyond what the null_resource provisioner needs at apply time.
+
+database_url = "postgresql://postgres:REPLACE_ME@db.mkmjnqflxbvwizdqnmdq.supabase.co:5432/postgres"

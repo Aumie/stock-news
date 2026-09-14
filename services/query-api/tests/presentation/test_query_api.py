@@ -77,7 +77,7 @@ def test_query_derives_symbols_from_watchlist_not_request_body(client, retriever
     response = client.post(
         "/query",
         json={"question": "what's new?", "symbols": ["IGNORED_SHOULD_NOT_BE_USED"]},
-        headers={"Authorization": f"Bearer {_make_token('user-1')}"},
+        headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"},
     )
 
     assert response.status_code == 200
@@ -88,7 +88,7 @@ def test_query_with_empty_watchlist_still_answers(client, retriever):
     response = client.post(
         "/query",
         json={"question": "what's new?"},
-        headers={"Authorization": f"Bearer {_make_token('user-with-no-watchlist')}"},
+        headers={"X-App-Authorization": f"Bearer {_make_token('user-with-no-watchlist')}"},
     )
 
     assert response.status_code == 200

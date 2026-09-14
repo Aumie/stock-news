@@ -111,7 +111,17 @@ def _trigger_sweep_if_daily_symbol_features_missing() -> None:
     # specific process.
     if not inspect(_engine).has_table("daily_symbol_features"):
         logger.warning("api.daily_symbol_features_missing_on_startup — enqueuing a sweep to rebuild it")
-        _backfill_queue.enqueue_daily_batch_sweep()
+        try:
+            _backfill_queue.enqueue_daily_batch_sweep()
+        except Exception:
+            # Real deploy failure found live: Cloud Run's query-api doesn't
+            # have a Celery/RabbitMQ broker deployed yet, so this raises a
+            # kombu ConnectionError that crashed the whole app at startup
+            # (ASGI lifespan failures are fatal, not just a failed request).
+            # This self-heal is a best-effort convenience, not a hard
+            # dependency — degrade to a log line instead of taking the
+            # entire service down when the broker is unreachable.
+            logger.warning("api.daily_symbol_features_sweep_enqueue_failed", exc_info=True)
 
 
 @app.get("/health")

@@ -31,7 +31,7 @@ def test_valid_token_allows_access(app):
     client = TestClient(app)
     token = _make_token(sub="user-123")
 
-    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+    response = client.get("/protected", headers={"X-App-Authorization": f"Bearer {token}"})
 
     assert response.status_code == 200
     assert response.json() == {"user_id": "user-123"}
@@ -50,7 +50,7 @@ def test_expired_token_returns_401(app):
     expired = datetime.now(timezone.utc) - timedelta(hours=1)
     token = _make_token(exp=expired)
 
-    response = client.get("/protected", headers={"Authorization": f"Bearer {token}"})
+    response = client.get("/protected", headers={"X-App-Authorization": f"Bearer {token}"})
 
     assert response.status_code == 401
 
@@ -58,6 +58,6 @@ def test_expired_token_returns_401(app):
 def test_malformed_header_returns_401(app):
     client = TestClient(app)
 
-    response = client.get("/protected", headers={"Authorization": "NotBearer sometoken"})
+    response = client.get("/protected", headers={"X-App-Authorization": "NotBearer sometoken"})
 
     assert response.status_code == 401

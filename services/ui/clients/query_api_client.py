@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import httpx
 
+from clients.query_api_auth import build_headers
+
 
 class QueryAPIClient:
     def __init__(self, base_url: str) -> None:
@@ -11,7 +13,7 @@ class QueryAPIClient:
         with httpx.stream(
             "POST",
             f"{self._base_url}/query",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers=build_headers(self._base_url, jwt),
             json={"question": question},
             timeout=30.0,
         ) as response:

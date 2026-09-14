@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 
 from application.backfill_service import BackfillService
 from application.rebuild_debounce_service import RebuildDebounceService
+from infrastructure.cloud_run_job_trigger import CloudRunJobTrigger
 from infrastructure.finnhub_news_client import FinnhubNewsClient
 from infrastructure.local_docker_job_trigger import LocalDockerJobTrigger
 from infrastructure.postgres_backfill_repo import PostgresBackfillProgressRepo
@@ -41,18 +42,22 @@ def build_backfill_service(settings: Settings) -> BackfillService:
     )
 
 
-def build_job_trigger(settings: Settings) -> LocalDockerJobTrigger | None:
+def build_job_trigger(settings: Settings) -> LocalDockerJobTrigger | CloudRunJobTrigger | None:
     if settings.compose_project_name:
         return LocalDockerJobTrigger(project_name=settings.compose_project_name)
+    if settings.gcp_project_id:
+        return CloudRunJobTrigger(project_id=settings.gcp_project_id, region=settings.gcp_region)
     logger.warning(
-        "COMPOSE_PROJECT_NAME not set — no job trigger wired, symbols added to a "
-        "watchlist won't get an immediate price/feature-store backfill (the daily "
-        "sweep will still pick them up)"
+        "Neither COMPOSE_PROJECT_NAME nor GCP_PROJECT_ID is set — no job trigger "
+        "wired, symbols added to a watchlist won't get an immediate price/"
+        "feature-store backfill (the daily sweep will still pick them up)"
     )
     return None
 
 
-def build_rebuild_debounce_service(settings: Settings, job_trigger: LocalDockerJobTrigger | None) -> RebuildDebounceService | None:
+def build_rebuild_debounce_service(
+    settings: Settings, job_trigger: LocalDockerJobTrigger | CloudRunJobTrigger | None
+) -> RebuildDebounceService | None:
     """Wires the "new news triggers a rebuild, but not more than once an hour
     per symbol" path (user request) — a symbol sitting on the watchlist keeps
     getting news from the poller long after it was added, and the only

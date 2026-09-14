@@ -77,7 +77,7 @@ def client(backfill_progress_repo):
 
 
 def _auth_headers(sub="user-1"):
-    return {"Authorization": f"Bearer {_make_token(sub)}"}
+    return {"X-App-Authorization": f"Bearer {_make_token(sub)}"}
 
 
 def test_get_watchlist_starts_empty(client):

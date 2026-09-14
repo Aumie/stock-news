@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
@@ -21,7 +22,16 @@ func main() {
 	// possible for anyone who has read this public source (decision_log_claude.md).
 	const defaultJWTSigningSecret = "dev-secret-change-me"
 
-	databaseURL := envOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/stock-news")
+	// The shared database-url secret (used by every service in this project)
+	// carries a "+psycopg" driver suffix for the Python/SQLAlchemy services —
+	// pgx has no notion of driver suffixes and fails to parse the URL with
+	// one present, so strip it here rather than changing the shared secret
+	// value and breaking the Python services again. Same fix as poller's pgx
+	// driver (services/poller/cmd/server/main.go).
+	databaseURL := strings.Replace(
+		envOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/stock-news"),
+		"postgresql+psycopg://", "postgresql://", 1,
+	)
 	jwtSecret := envOrDefault("JWT_SIGNING_SECRET", defaultJWTSigningSecret)
 	port := envOrDefault("PORT", "50051")
 

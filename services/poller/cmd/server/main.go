@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -14,7 +15,15 @@ import (
 )
 
 func main() {
-	databaseURL := envOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/stock-news")
+	// The shared database-url secret (used by every service in this project)
+	// carries a "+psycopg" driver suffix for the Python/SQLAlchemy services —
+	// pgx has no notion of driver suffixes and fails to parse the URL with
+	// one present, so strip it here rather than changing the shared secret
+	// value and breaking the Python services again.
+	databaseURL := strings.Replace(
+		envOrDefault("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/stock-news"),
+		"postgresql+psycopg://", "postgresql://", 1,
+	)
 	finnhubBaseURL := envOrDefault("FINNHUB_BASE_URL", "https://finnhub.io/api/v1")
 	finnhubToken := os.Getenv("FINNHUB_API_KEY")
 	marketauxBaseURL := envOrDefault("MARKETAUX_BASE_URL", "https://api.marketaux.com")

@@ -18,10 +18,17 @@ class Settings(BaseSettings):
     processing_url: str = "http://localhost:8001"
     log_env: str = "dev"
     # Local-dev only — selects LocalDockerJobTrigger when set (docker-compose.yml
-    # pins this to "stock-news"). Unset in the cloud image; the milestone 7
-    # migration wires CloudRunJobTrigger there instead (decision_log.md).
+    # pins this to "stock-news"). Unset in the cloud image, where
+    # gcp_project_id selects CloudRunJobTrigger instead (decision_log.md).
     compose_project_name: str = ""
     # RabbitMQ broker for Celery's watchlist-add backfill task queue — a
     # local docker-compose service here, CloudAMQP's free "Little Lemur"
     # tier at the milestone 7 cloud migration (decision_log.md).
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672//"
+    # Cloud-only — selects CloudRunJobTrigger when set (Terraform sets this
+    # to the real GCP project ID for query-api's Cloud Run deployment). Empty
+    # locally, where compose_project_name selects LocalDockerJobTrigger
+    # instead; build_job_trigger() checks compose_project_name first, so both
+    # being set at once (shouldn't happen) still resolves predictably.
+    gcp_project_id: str = ""
+    gcp_region: str = "us-central1"

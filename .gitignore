@@ -14,6 +14,17 @@ logs/
 dbt_packages/
 .user.yml
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+
 # Docker
 *.pid
 
@@ -21,7 +32,7 @@ dbt_packages/
 .env
 .env.*
 !.env.example
-services/ui/.streamlit/secrets.toml
+services/ui/.streamlit/secrets*.toml
 
 # IDE
 .vscode/

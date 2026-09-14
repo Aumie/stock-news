@@ -77,7 +77,7 @@ def client(stats_queries):
 
 
 def test_stats_returns_overview_and_per_symbol_breakdown(client):
-    response = client.get("/stats", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/stats", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     body = response.json()
@@ -88,7 +88,7 @@ def test_stats_returns_overview_and_per_symbol_breakdown(client):
 
 
 def test_stats_returns_both_windows_in_one_call_no_days_param_needed(client):
-    response = client.get("/stats", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/stats", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     body = response.json()
@@ -97,7 +97,7 @@ def test_stats_returns_both_windows_in_one_call_no_days_param_needed(client):
 
 
 def test_stats_7d_window_excludes_points_older_than_7_days(client):
-    response = client.get("/stats", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/stats", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     window_7d = response.json()["by_symbol"]["AAPL"]["window_7d"]
     dates = [row["date"] for row in window_7d["rolling_volume"]]
@@ -108,7 +108,7 @@ def test_stats_7d_window_excludes_points_older_than_7_days(client):
 
 
 def test_stats_30d_window_includes_points_older_than_7_days(client):
-    response = client.get("/stats", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/stats", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     window_30d = response.json()["by_symbol"]["AAPL"]["window_30d"]
     dates = [row["date"] for row in window_30d["rolling_volume"]]
@@ -117,7 +117,7 @@ def test_stats_30d_window_includes_points_older_than_7_days(client):
 
 
 def test_stats_windows_use_their_own_rolling_avg_field(client):
-    response = client.get("/stats", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/stats", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     body = response.json()
     window_7d_point = next(

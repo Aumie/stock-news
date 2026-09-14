@@ -74,7 +74,7 @@ def client(feed_queries):
 
 
 def test_feed_scoped_to_callers_watchlist(client, feed_queries):
-    response = client.get("/feed", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/feed", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     assert feed_queries.last_symbols == ["AAPL"]
@@ -91,7 +91,7 @@ def test_feed_passes_before_cursor_through_to_query(client, feed_queries):
     response = client.get(
         "/feed",
         params={"before": "2026-09-01T00:00:00+00:00", "before_id": "abc-123"},
-        headers={"Authorization": f"Bearer {_make_token('user-1')}"},
+        headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"},
     )
 
     assert response.status_code == 200
@@ -100,7 +100,7 @@ def test_feed_passes_before_cursor_through_to_query(client, feed_queries):
 
 
 def test_feed_without_before_cursor_passes_none(client, feed_queries):
-    response = client.get("/feed", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/feed", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     assert feed_queries.last_before is None
@@ -111,7 +111,7 @@ def test_feed_first_page_requests_per_symbol_quota(client, feed_queries):
     # Real bug found live: a noisy symbol crowded a newly-added, quieter
     # symbol out of the feed entirely. The very first page (no cursor) must
     # ask FeedQueries to guarantee a per-symbol quota, not a flat top-N.
-    response = client.get("/feed", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.get("/feed", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     assert feed_queries.last_per_symbol_limit is not None
@@ -124,7 +124,7 @@ def test_feed_paged_request_does_not_request_per_symbol_quota(client, feed_queri
     response = client.get(
         "/feed",
         params={"before": "2026-09-01T00:00:00+00:00", "before_id": "abc-123"},
-        headers={"Authorization": f"Bearer {_make_token('user-1')}"},
+        headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"},
     )
 
     assert response.status_code == 200
@@ -189,7 +189,7 @@ def client_with_backfill(feed_queries, backfill_service, backfill_queue):
 
 
 def test_feed_backfill_more_calls_service_with_callers_watchlist(client_with_backfill, backfill_service):
-    response = client_with_backfill.post("/feed/backfill-more", headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client_with_backfill.post("/feed/backfill-more", headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     assert backfill_service.load_more_for_symbols_calls == ["AAPL"]
@@ -208,7 +208,7 @@ def test_feed_load_older_returns_items_when_postgres_already_has_them(client_wit
     response = client_with_backfill.post(
         "/feed/load-older",
         json={"before": "2026-09-01T00:00:00+00:00", "before_id": "abc-123"},
-        headers={"Authorization": f"Bearer {_make_token('user-1')}"},
+        headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"},
     )
 
     assert response.status_code == 200
@@ -235,7 +235,7 @@ def test_feed_load_older_enqueues_background_backfill_when_postgres_is_empty(bac
     )
     client = TestClient(app)
 
-    response = client.post("/feed/load-older", json={}, headers={"Authorization": f"Bearer {_make_token('user-1')}"})
+    response = client.post("/feed/load-older", json={}, headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"})
 
     assert response.status_code == 200
     body = response.json()
@@ -246,7 +246,7 @@ def test_feed_load_older_enqueues_background_backfill_when_postgres_is_empty(bac
 
 def test_feed_load_older_without_cursor_for_first_page(client_with_backfill):
     response = client_with_backfill.post(
-        "/feed/load-older", json={}, headers={"Authorization": f"Bearer {_make_token('user-1')}"}
+        "/feed/load-older", json={}, headers={"X-App-Authorization": f"Bearer {_make_token('user-1')}"}
     )
 
     assert response.status_code == 200

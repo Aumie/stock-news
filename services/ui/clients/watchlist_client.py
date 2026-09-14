@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import httpx
 
+from clients.query_api_auth import build_headers
+
 
 class WatchlistAPIClient:
     def __init__(self, base_url: str) -> None:
@@ -10,7 +12,7 @@ class WatchlistAPIClient:
     def list_symbols(self, jwt: str) -> list[dict]:
         response = httpx.get(
             f"{self._base_url}/watchlist",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers=build_headers(self._base_url, jwt),
             timeout=10.0,
         )
         response.raise_for_status()
@@ -19,7 +21,7 @@ class WatchlistAPIClient:
     def add_symbol(self, jwt: str, symbol: str) -> tuple[bool, str | None]:
         response = httpx.post(
             f"{self._base_url}/watchlist",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers=build_headers(self._base_url, jwt),
             json={"symbol": symbol},
             # The response returns as soon as symbol validation + the DB
             # write finish — the news/price backfill runs in a background
@@ -42,7 +44,7 @@ class WatchlistAPIClient:
     def remove_symbol(self, jwt: str, symbol: str) -> None:
         response = httpx.delete(
             f"{self._base_url}/watchlist/{symbol}",
-            headers={"Authorization": f"Bearer {jwt}"},
+            headers=build_headers(self._base_url, jwt),
             timeout=10.0,
         )
         response.raise_for_status()
