@@ -66,7 +66,7 @@ jobs:
         run: uv run ruff check .
 
       - name: pytest
-        run: uv run python -m pytest -v
+        run: uv run python -m pytest -v --cov=. --cov-report=json
         env:
           # daily-batch connects with raw psycopg (main.py itself strips
           # "+psycopg" before calling psycopg.connect() — see its own
@@ -81,6 +81,13 @@ jobs:
           ANTHROPIC_API_KEY: ""
           FINNHUB_API_KEY: ""
           MARKETAUX_API_KEY: ""
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: services/${{ matrix.service }}/coverage.json
+          retention-days: 1
 
   go-tests:
     name: Go tests (${{ matrix.service }})
@@ -118,4 +125,84 @@ jobs:
         run: go build ./...
 
       - name: go test (unit)
-        run: go test ./internal/...
+        run: go test ./internal/... -coverprofile=coverage.out
+
+      - name: Convert coverage to the shared JSON shape
+        # go tool cover only reports a percentage, not raw covered/total
+        # statement counts — parse the raw profile directly (each line past
+        # the "mode:" header is "file:pos numStatements count") so this
+        # combines correctly with the Python services' pytest-cov numbers
+        # in the aggregation job, weighted by actual statement count rather
+        # than averaging two already-averaged percentages.
+        run: |
+          awk 'NR>1 { total+=$2; if ($3>0) covered+=$2 } END {
+            printf "{\"covered_lines\": %d, \"num_statements\": %d}\n", covered, total
+          }' coverage.out > coverage.json
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: services/${{ matrix.service }}/coverage.json
+          retention-days: 1
+
+  coverage-badge:
+    name: Update coverage badge
+    # Only on a real push to main, not PRs — a PR's coverage number isn't
+    # "the repo's" coverage until merged, and committing a badge update on
+    # every PR run would spam PR branches with noise commits.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [python-tests, go-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: coverage-*
+          path: coverage-artifacts
+
+      - name: Aggregate coverage, weighted by actual statement count
+        # pytest-cov's JSON nests the totals under "totals"; the Go job's
+        # JSON (built above) is already flat in the same shape — jq's //
+        # falls back to the flat fields when "totals" isn't present, so one
+        # expression reads both without reshaping either source.
+        run: |
+          covered=0
+          total=0
+          for f in coverage-artifacts/*/coverage.json; do
+            c=$(jq '(.totals.covered_lines // .covered_lines)' "$f")
+            t=$(jq '(.totals.num_statements // .num_statements)' "$f")
+            covered=$((covered + c))
+            total=$((total + t))
+          done
+          pct=$(awk -v c="$covered" -v t="$total" 'BEGIN { printf "%.1f", (c/t)*100 }')
+          echo "COVERAGE_PCT=$pct" >> "$GITHUB_ENV"
+          echo "covered=$covered total=$total pct=$pct%"
+
+      - name: Write badge JSON
+        run: |
+          mkdir -p badges
+          color=red
+          awk -v p="$COVERAGE_PCT" 'BEGIN { exit !(p >= 80) }' && color=brightgreen
+          awk -v p="$COVERAGE_PCT" 'BEGIN { exit !(p >= 60 && p < 80) }' && color=yellow
+          cat > badges/coverage.json <<EOF
+          {
+            "schemaVersion": 1,
+            "label": "coverage",
+            "message": "${COVERAGE_PCT}%",
+            "color": "${color}"
+          }
+          EOF
+
+      - name: Commit badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add badges/coverage.json
+          git diff --staged --quiet && exit 0
+          git commit -m "Update coverage badge (${COVERAGE_PCT}%) [skip ci]"
+          git push

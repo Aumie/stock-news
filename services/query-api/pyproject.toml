@@ -24,6 +24,7 @@ dependencies = [
 dev = [
     "httpx>=0.28.1",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "pytest-httpx>=0.35.0",
     "ruff>=0.16.8",
 ]
@@ -35,3 +36,6 @@ torch = [{ index = "pytorch-cpu" }]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
+
+[tool.coverage.run]
+omit = ["tests/*"]
