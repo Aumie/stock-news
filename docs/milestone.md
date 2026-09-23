@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 9 (Polish) — next up
+**Current milestone:** all of v1 (milestones 1-9) done — v2 not started, see below
 
 ---
 
@@ -145,13 +145,13 @@ pytest suite, GitHub Actions CI on all branches, `dev`/`main` branch split, Terr
 
 **Known gaps in what CI covers today, carried forward deliberately, not forgotten**: no `dbt test` run in CI (needs real OHLCV data); no Pub/Sub-emulator-backed run of `poller`'s emulator test; CD needs WIF (§7) plus a `DATABASE_URL` GitHub secret for the Supabase-hosted Postgres before it can actually run.
 
-## 9. Polish
+## 9. Polish — done
 Data quality checks, ingestion logging, README with architecture diagram.
 
-- [ ] Data quality validation (non-empty text, valid symbol, no duplicate ingestion)
-- [ ] `structlog` logging wired (console locally, JSON on Cloud Run)
-- [ ] LLM spend ceiling set on the provider account + honest "cap reached" message path
-- [ ] README — architecture diagram, data lineage notes, setup instructions
+- [x] Data quality validation (non-empty text, valid symbol, no duplicate ingestion) — duplicate ingestion was already fully covered by the three-tier dedup design (milestone 4); genuinely missing was rejecting structurally invalid input before it could dedup "successfully" as if it were real data. New `domain/validation.py` (`processing`) rejects blank/whitespace-only headline or content and malformed symbols (regex, 1-5 uppercase letters + optional exchange-suffix dot, matching the shape the watchlist's own Finnhub-backed validation already excludes elsewhere). Wired into `ProcessArticleUseCase.process()` — both entry paths (`POST /articles/ingest`, `POST /pubsub/push`) get it for free. Ingest API maps it to a `422` (existing convention); pubsub push logs-and-drops with a `200` rather than crashing, since Pub/Sub would otherwise retry a message whose content can never become valid. 15 new tests, full processing suite (48 tests) verified live against a real Postgres container
+- [x] `structlog`/`log/slog` logging wired (console locally, JSON on Cloud Run) — the 4 Python services already had this from earlier milestones (confirmed, not new work). The 2 Go services (`auth`, `poller`) had only plain `log.Printf`/`log.Fatalf` until this pass: a small `NewLogger(env)` helper (duplicated in each service, matching this project's no-shared-package-between-Go-services pattern) mirrors the Python `configure_logging(env)` shape exactly — text locally, JSON on Cloud Run, switched on the same `LOG_ENV` variable every service already reads. Threaded through both services' startup logging and their one genuinely log-worthy request path each (`auth`'s gRPC handler's internal-error branch, `poller`'s `TriggerHandler` poll-cycle-result logging). Verified live: `auth` 9/9 tests, `poller` 28 passed + 1 correctly skipped, both build/vet/gofmt clean
+- [x] LLM spend ceiling set on the provider account + honest "cap reached" message path — the message/error-handling path already existed from an earlier session (`AnthropicLLMClient.stream()` catches `PermissionDeniedError`/`RateLimitError` and yields a real "spending cap reached" message instead of crashing the stream, plus a separate `BadRequestError` path for config errors). The cap itself is an Anthropic Console account setting, set by the user directly (not something a coding session can do)
+- [x] README — architecture diagram, data lineage notes, setup instructions — [`README.md`](../README.md) added at the repo root (didn't exist before this milestone): a Mermaid architecture diagram covering all 6 deployables and the two separate queues (Pub/Sub for poller->processing decoupling, Celery+CloudAMQP for the watchlist-add-returns-instantly requirement), a service/port table for local dev, testing/CI/CD instructions, and links out to the deeper docs (requirements, api-spec, er-diagram, project-structure, both decision logs) rather than duplicating them
 
 ---
 
