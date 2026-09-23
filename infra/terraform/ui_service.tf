@@ -52,7 +52,17 @@ resource "google_cloud_run_v2_service" "ui" {
     volumes {
       name = "ui-oauth-secrets"
       secret {
-        secret = google_secret_manager_secret.ui_oauth_secrets.secret_id
+        secret       = google_secret_manager_secret.ui_oauth_secrets.secret_id
+        # Secret volume files default to a restrictive mode (readable only
+        # by root/root's group) — this container runs as non-root appuser
+        # (Dockerfile), which couldn't read the mounted secrets.toml at all.
+        # Streamlit's own secrets loader treats a read failure the same as
+        # "file doesn't exist" rather than raising, so the real cause never
+        # surfaced as anything more specific than "no auth provider
+        # configured" (StreamlitAuthError) — found live, the secret's
+        # content was already correct the whole time. 0444: world-readable,
+        # not writable, matching this being a read-only mount.
+        default_mode = 0444
         items {
           version = "latest"
           path    = "secrets.toml"

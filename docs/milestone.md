@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 7 (Cloud migration) — next up
+**Current milestone:** 8 (Testing & CI/CD) — next up
 
 ---
 
@@ -114,13 +114,15 @@ Query panel, digest view, live ingestion feed, stats.
 
 **Watchlist-add and "load older news" moved off the request path onto a Celery + RabbitMQ background job queue, per direct user request**: "when add symbol shouldnt it be instant, add leave loading news as background job?" — the best-effort chunk fixes above made backfill failures non-fatal, but the request could still block for a long time waiting on Finnhub. User specifically asked for a durable (Hangfire-style) job system rather than FastAPI's in-process `BackgroundTasks`; chose RabbitMQ as Celery's broker after working through the real alternatives — self-hosting on Cloud Run doesn't actually solve durability (no real persistent disk there) and still costs like an always-on VM, while CloudAMQP's free "Little Lemur" shared plan (verified live to genuinely exist, not a trial) gives a real managed broker with zero hosting burden. `POST /watchlist` now returns as soon as symbol validation and the DB write finish; the actual news + price backfill runs in a new `celery-worker` container. Hit and fixed two real, non-obvious RabbitMQ 4.x/Celery incompatibilities along the way (both confirmed live, not found in docs first): the default task queue declaration and Celery's own `mingle`/`gossip` startup bootsteps both rely on a queue pattern RabbitMQ 4.x has deprecated and rejects outright — fixed with a durable task queue plus `--without-mingle --without-gossip --without-heartbeat` (CLI-only flags, not available as settings). `POST /feed/load-older` got the identical fix once the user reported "loading older news takes so long" — traced live to three sequential ~31s Finnhub timeouts (95+ seconds for one click); now pages Postgres first and, if empty, enqueues one background backfill window per symbol and returns immediately (`backfilling: true`) instead of retrying synchronously. **Live-verified**: the same load-older call went from 95+ seconds to **0.27 seconds**, with the Celery worker confirmed picking up the enqueued task within milliseconds.
 
-## 7. Cloud migration
-Move queue, storage, and processing to GCP (Pub/Sub, Cloud Run, BigQuery).
+## 7. Cloud migration — done (BigQuery skipped by design, WIF deferred)
+Move queue, storage, and processing to GCP (Pub/Sub, Cloud Run).
 
-- [ ] Terraform: Cloud Run (5 services + 1 job), Pub/Sub (push, not pull), BigQuery, Secret Manager, Cloud Scheduler
-- [ ] IAM lockdown — `roles/run.invoker` matrix (`api-spec.md`'s per-service auth notes); only UI is `--allow-unauthenticated`
-- [ ] Workload Identity Federation for CI/CD, scoped to `main`
-- [ ] All 6 deployables live on GCP
+- [x] Terraform: Cloud Run (6 services: auth, processing, query-api, poller, ui, celery-worker + 1 job: daily-batch), Pub/Sub (push, not pull), Secret Manager, Cloud Scheduler (poller-trigger every minute, daily-batch-trigger at 6am UTC). BigQuery was never adopted — `prices`/`daily_symbol_features` stayed on the same Postgres instance used everywhere else, an earlier deliberate decision (`decision_log.md`), not a migration gap
+- [x] IAM lockdown — `roles/run.invoker` matrix, tightened further than originally planned once real cross-service calls surfaced gaps live: query-api's own JWT moved to `X-App-Authorization` so it stops contending with Cloud Run's own ID token for `Authorization`; `processing`'s invoker binding extended to query-api/celery-worker with an ID token attached to the `/articles/ingest` call; the daily-batch job-run grant needed `roles/run.developer`, not just `roles/run.invoker` (plain invoker doesn't cover `run.jobs.runWithOverrides`, needed for `--symbol` overrides). Only `ui` is `--allow-unauthenticated` (`allUsers` invoker)
+- [ ] Workload Identity Federation for CI/CD, scoped to `main` — not started; deploys this milestone were all done by hand via `gcloud`/`terraform apply`, not from CI
+- [x] All 6 deployables live on GCP, real CloudAMQP broker replacing local RabbitMQ, and a new `CloudRunJobTrigger` (calls the Cloud Run Jobs `:run` API) replacing `LocalDockerJobTrigger` so watchlist-add still gets an immediate per-symbol price/feature-store backfill in the cloud, not just the daily sweep
+
+Also fixed several real bugs found only once real cloud traffic hit these services: `auth`/`poller`/`daily-batch` couldn't parse the shared `database-url` secret's SQLAlchemy-only `+psycopg` driver suffix (pgx and raw `psycopg` both choke on it); `daily-batch`'s dbt env derivation passed a still-percent-encoded password to dbt; `query-api`'s startup self-heal hook crashed the whole app when RabbitMQ was unreachable; HuggingFace rate-limited cold starts until the embedding model was baked into the image with `HF_HUB_OFFLINE=1`; Cloud Run's own startup TCP probe killed `celery-worker` every ~4 minutes since a Celery worker has no listening port, fixed with a trivial stub HTTP server in the container entrypoint.
 
 ## 8. Testing & CI/CD
 pytest suite, GitHub Actions CI on all branches, `dev`/`main` branch split, Terraform for all GCP resources, CD gated to `main`.

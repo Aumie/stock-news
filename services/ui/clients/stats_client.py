@@ -13,11 +13,13 @@ class StatsAPIClient:
         response = httpx.get(
             f"{self._base_url}/stats",
             headers=build_headers(self._base_url, jwt),
-            # 30s, not 10s — found live: a busy symbol's watchlist-add
-            # backfill runs dozens of sequential ingest calls against the
-            # same Postgres instance /stats reads from, and 10s wasn't
-            # always enough headroom while that write load was ongoing.
-            timeout=30.0,
+            # 90s — query-api scales to zero (min_instance_count=0) and a
+            # cold start loading its SentenceTransformer model can take
+            # 10-70+s before the first request even gets served; a real
+            # cold-start request was clocked at 74.66s live. Heavy watchlist
+            # backfill write load (dozens of sequential ingest calls) can
+            # add further headroom on top of that.
+            timeout=90.0,
         )
         response.raise_for_status()
         return response.json()
