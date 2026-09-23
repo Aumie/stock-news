@@ -155,10 +155,18 @@ jobs:
     needs: [python-tests, go-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The default GITHUB_TOKEN's push is still blocked by main's
+          # ruleset even with contents:write — confirmed live: neither a
+          # RepositoryRole nor an Integration bypass actor covers it (the
+          # Integration type specifically requires an organization-owned
+          # app installation, which a personal-account repo doesn't have).
+          # BADGE_PUSH_TOKEN is a fine-grained PAT scoped to just this repo
+          # (Contents: read/write), belonging to the repo owner, so it
+          # bypasses the ruleset the same way the owner's own pushes do.
+          token: ${{ secrets.BADGE_PUSH_TOKEN }}
 
       - uses: actions/download-artifact@v5
         with:
