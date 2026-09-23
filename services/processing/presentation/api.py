@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from sqlalchemy import create_engine
 
 from application.process_article import ProcessArticleUseCase
+from domain.validation import ArticleValidationError
 from infrastructure.chunking import FixedSizeChunker
 from infrastructure.dedup_precheck import PostgresDedupPrecheck
 from infrastructure.embeddings import SentenceTransformerEmbedder
@@ -44,6 +45,14 @@ def health() -> dict[str, str]:
 @app.post("/pubsub/push")
 def pubsub_push(envelope: PubSubPushEnvelope) -> dict[str, str]:
     article, symbol = parse_push_envelope(envelope)
-    article_id = _use_case.process(article, symbol=symbol)
+    try:
+        article_id = _use_case.process(article, symbol=symbol)
+    except ArticleValidationError as exc:
+        # A 2xx tells Pub/Sub not to retry — structurally invalid data
+        # (blank headline/content, malformed symbol) will never become
+        # valid on redelivery, so retrying would only loop forever instead
+        # of ever succeeding. Logged, not silently dropped.
+        logger.warning("dropping invalid article from pubsub push", symbol=symbol, error=str(exc))
+        return {"status": "dropped", "reason": str(exc)}
     logger.info("processed article", article_id=article_id, symbol=symbol, source=article.source)
     return {"status": "ok", "article_id": article_id}

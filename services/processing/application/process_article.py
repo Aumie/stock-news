@@ -5,6 +5,7 @@ from typing import Protocol
 from domain.article import Article
 from domain.dedup import content_hash, fuzzy_key
 from domain.repository import ArticleRepository, Chunker, DedupPrecheck, Embedder, UnitOfWorkFactory
+from domain.validation import validate_article
 
 
 class NewsIngestedNotifier(Protocol):
@@ -27,6 +28,12 @@ class ProcessArticleUseCase:
         self._news_ingested_notifier = news_ingested_notifier
 
     def process(self, article: Article, symbol: str) -> str:
+        # Rejects structurally invalid input (blank headline/content,
+        # malformed symbol) before it can dedup "successfully" as if it were
+        # real data — content_hash/fuzzy_key would happily hash and store a
+        # blank headline otherwise (milestone.md §9, data quality checks).
+        validate_article(article, symbol)
+
         # Two-phase: a cheap, read-only dedup check first (outside any
         # transaction) skips embedding entirely for an already-known article,
         # preserving §4.3's "no re-embed on a cross-match" guarantee. Only a

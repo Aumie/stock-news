@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from application.process_article import ProcessArticleUseCase
 from domain.article import Article
+from domain.validation import ArticleValidationError
 
 
 class IngestRequest(BaseModel):
@@ -41,7 +42,10 @@ def build_ingest_router(use_case: ProcessArticleUseCase) -> APIRouter:
             content=request.content,
             canonical_url=request.canonical_url,
         )
-        article_id = use_case.process(article, symbol=request.symbol)
+        try:
+            article_id = use_case.process(article, symbol=request.symbol)
+        except ArticleValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return IngestResponse(article_id=article_id)
 
     return router

@@ -5,6 +5,7 @@ import pytest
 from application.process_article import ProcessArticleUseCase
 from domain.article import Article
 from domain.dedup import content_hash, fuzzy_key
+from domain.validation import ArticleValidationError
 
 
 class FakeRepo:
@@ -281,6 +282,28 @@ class TestNewsIngestedNotifier:
         article = _article(canonical_url="https://example.com/1")
 
         uc.process(article, symbol="AAPL")  # does not raise
+
+
+class TestInputValidation:
+    def test_rejects_blank_headline_before_dedup_or_embedding(self, use_case):
+        uc, repo, embedder, writer = use_case
+        article = _article(headline="  ", canonical_url="https://example.com/1")
+
+        with pytest.raises(ArticleValidationError):
+            uc.process(article, symbol="AAPL")
+
+        assert embedder.embed_calls == 0
+        assert len(writer.writes) == 0
+
+    def test_rejects_malformed_symbol_before_dedup_or_embedding(self, use_case):
+        uc, repo, embedder, writer = use_case
+        article = _article(canonical_url="https://example.com/1")
+
+        with pytest.raises(ArticleValidationError):
+            uc.process(article, symbol="not-a-symbol")
+
+        assert embedder.embed_calls == 0
+        assert len(writer.writes) == 0
 
 
 class TestRaceBetweenPrecheckAndTransaction:

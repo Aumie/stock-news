@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from domain.validation import ArticleValidationError
 from presentation.ingest_api import build_ingest_router
 
 
@@ -14,6 +15,11 @@ class FakeUseCase:
         self.last_article = article
         self.last_symbol = symbol
         return self._article_id
+
+
+class FakeUseCaseRejectingInput:
+    def process(self, article, symbol: str) -> str:
+        raise ArticleValidationError(f"malformed symbol: {symbol!r}")
 
 
 def _client(use_case):
@@ -71,3 +77,21 @@ def test_ingest_missing_required_field_returns_422():
     response = client.post("/articles/ingest", json={"source": "finnhub"})
 
     assert response.status_code == 422
+
+
+def test_ingest_rejects_structurally_invalid_input_with_422():
+    client = _client(FakeUseCaseRejectingInput())
+
+    response = client.post(
+        "/articles/ingest",
+        json={
+            "source": "finnhub",
+            "headline": "headline",
+            "published_at": "2026-09-01T14:30:00Z",
+            "content": "body",
+            "symbol": "not-a-symbol",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "not-a-symbol" in response.json()["detail"]
