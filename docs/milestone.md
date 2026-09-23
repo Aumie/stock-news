@@ -4,7 +4,7 @@ Tracks progress against `stock-news-digest-requirements.md` §9. Update checkbox
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done
 
-**Current milestone:** 8 (Testing & CI/CD) — next up
+**Current milestone:** 8 (Testing & CI/CD) — in progress, CI landed, CD/branch protection remain
 
 ---
 
@@ -124,15 +124,25 @@ Move queue, storage, and processing to GCP (Pub/Sub, Cloud Run).
 
 Also fixed several real bugs found only once real cloud traffic hit these services: `auth`/`poller`/`daily-batch` couldn't parse the shared `database-url` secret's SQLAlchemy-only `+psycopg` driver suffix (pgx and raw `psycopg` both choke on it); `daily-batch`'s dbt env derivation passed a still-percent-encoded password to dbt; `query-api`'s startup self-heal hook crashed the whole app when RabbitMQ was unreachable; HuggingFace rate-limited cold starts until the embedding model was baked into the image with `HF_HUB_OFFLINE=1`; Cloud Run's own startup TCP probe killed `celery-worker` every ~4 minutes since a Celery worker has no listening port, fixed with a trivial stub HTTP server in the container entrypoint.
 
-## 8. Testing & CI/CD
+## 8. Testing & CI/CD — in progress
 pytest suite, GitHub Actions CI on all branches, `dev`/`main` branch split, Terraform for all GCP resources, CD gated to `main`.
 
-- [ ] pytest, written before implementation, for: dedup key tiers, overflow-assignment ranking, cadence-scaling formula, symbol validation, JWT expiry/logout
-- [ ] Go tests for Auth and Poller domain logic (same TDD discipline, Go-idiomatic structure)
-- [ ] dbt schema tests (not-null, uniqueness) on `daily_symbol_features`
-- [ ] GitHub Actions CI — tests + lint on every branch/PR
-- [ ] GitHub Actions CD — gated to `main`, `terraform plan` on PR / `apply` on merge
-- [ ] `dev`/`main` branch protection configured
+- [x] pytest, written before implementation, for: dedup key tiers, overflow-assignment ranking, cadence-scaling formula, symbol validation, JWT expiry/logout — already existed from milestones 1-7's own TDD discipline (query-api alone: 182 tests), not new work this milestone. Full suite re-verified live against a real Postgres container for the first time as a single run: 179 passed, 3 skipped (Finnhub live tests, no key set locally), 0 failed
+- [x] Go tests for Auth and Poller domain logic — already existed (same TDD discipline). Re-verified live: `auth` 9/9 unit tests, `poller` 29/29 unit tests, both `go vet`/`gofmt` clean
+- [x] dbt schema tests (not-null, uniqueness) on `daily_symbol_features` — already existed (`services/daily-batch/dbt/models/schema.yml` + 2 singular tests), confirmed present, not re-run against real dbt this pass (needs real OHLCV data, out of CI's current scope)
+- [x] GitHub Actions CI — tests + lint on every branch/PR (`.github/workflows/ci.yml`): Python job matrixed over all 4 services (real `pgvector/pgvector:pg16` Postgres service container + `init.sql`, `ruff check` with a curated `E`/`F`/`I` ruleset — added fresh, see below — then `pytest`); Go job matrixed over `auth`/`poller` (`gofmt -l`, `go vet`, `go build`, `go test ./internal/...`)
+- [~] GitHub Actions CD — `.github/workflows/cd.yml` scaffolded (`terraform plan` on PR touching `infra/terraform/**`, `apply` on merge to `main`, gated behind a GitHub Environment) but deliberately inert: references a Workload Identity Federation provider/service-account that don't exist yet (§7's WIF item, still not started — needs the project owner's own GCP console access, not something a coding session can do)
+- [ ] `dev`/`main` branch protection configured — not started; needs a `dev` branch to exist first and is a GitHub repo-settings change, not code
+
+**Real bug found and fixed live during CI setup, unrelated to CI wiring itself**: `poller`'s `pubsub_publisher_test.go` (`internal/poller`, this project's own "unit test" location) requires the real Pub/Sub emulator, and its own `startEmulatorOrSkip` skip-check never actually detected "emulator absent" — `grpc.NewClient` doesn't dial eagerly, so the check always "succeeded," and the test then hung for the full default 60s context deadline on the emulator admin calls instead of skipping. Confirmed live (reproduced the 60s hang with no emulator running, timing it precisely). Fixed with a short-lived blocking dial (`grpc.DialContext` + `grpc.WithBlock()`, 2s timeout) that forces a real connection attempt; re-verified live — now correctly skips in ~2s.
+
+**Second real bug found live, in `ui`'s own test suite**: `test_navigation_does_not_raise_url_pathname_collision` (the milestone-6 regression test for the `st.navigation()` pathname-collision crash) uses Streamlit's `AppTest` harness, whose default `run()` timeout is 3s — reproduced live as a real flake: passes in isolation (1.56s) but times out when run after the rest of the suite under load. Fixed with an explicit `at.run(timeout=15)`; re-verified live, full 11/11-test suite green including this one.
+
+**A third, environment-only finding, not a codebase bug**: on this Windows dev machine, a Postgres-reachability check (`engine.connect()` against an unreachable `localhost:5432`) does not fail fast the way it does on Linux — confirmed live it can hang 10+ minutes instead of raising promptly, which broke every integration test's own `pytest.skip()`-when-unreachable fallback locally until a real `docker compose up -d postgres` was started. Documented here because it's exactly the kind of thing that looks like a hung test but isn't — GitHub Actions' Linux runners fail a closed-port connect near-instantly, so `ci.yml` needed no change for this; it only affected local verification during this session.
+
+**Also added `ruff` (dev dependency + `ruff.toml`) to all 4 Python services for the first time** — none had a linter configured before. Scoped deliberately narrow (`select = ["E", "F", "I"]`, `ignore = ["E501"]`) after the full default ruleset surfaced 100+ pre-existing hits dominated by stylistic/modernization rules (`UP017` datetime.UTC alias, etc.) unrelated to real bugs — adopting those is a deliberate future cleanup, not a side effect of turning CI on. The narrower set still caught and fixed 7 real issues (unused imports, unsorted imports) across query-api/processing/ui. `ruff format` was checked but **not** enforced or applied — it would have reformatted 32 files (mostly long-line wrapping) with no behavior change, and reformatting was deliberately left out of this pass rather than folded silently into a CI-setup diff.
+
+**Known gaps in what CI covers today, carried forward deliberately, not forgotten**: no `dbt test` run in CI (needs real OHLCV data); no Pub/Sub-emulator-backed run of `poller`'s emulator test; CD needs WIF (§7) plus a `DATABASE_URL` GitHub secret for the Supabase-hosted Postgres before it can actually run.
 
 ## 9. Polish
 Data quality checks, ingestion logging, README with architecture diagram.

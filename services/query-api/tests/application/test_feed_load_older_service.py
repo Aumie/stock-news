@@ -1,7 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
-
 from application.feed_load_older_service import FeedLoadOlderService
 from domain.feed import FeedItem
 

@@ -1,0 +1,92 @@
+name: CD
+
+# Deliberately inert until Workload Identity Federation is set up
+# (docs/milestone.md §7 — "WIF for CI/CD, scoped to main" is tracked as not
+# started). This workflow references a WIF provider/service-account and two
+# repo variables that don't exist yet; `google-github-actions/auth` fails
+# fast and visibly on a missing/misconfigured identity rather than silently
+# skipping, so this is safe to merge ahead of the GCP-side setup. All GCP
+# console/IAM steps below require the project owner's own GCP access, not
+# something done from a coding session.
+#
+# To activate:
+#   1. Create a Workload Identity Pool + Provider scoped to this repo, and a
+#      dedicated CI service account with least-privilege roles (Terraform
+#      apply needs more than any single Cloud Run service's own runtime SA
+#      has today — plan the exact role set before granting it).
+#   2. Set repo variables WIF_PROVIDER and WIF_SERVICE_ACCOUNT
+#      (Settings -> Secrets and variables -> Actions -> Variables).
+#   3. terraform.tfvars's database_url (Supabase, per infra/terraform/
+#      terraform.tfvars.example) needs to reach this job some other way —
+#      as a repo secret injected into a generated tfvars file, not committed.
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["infra/terraform/**"]
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**"]
+
+permissions:
+  contents: read
+  id-token: write # required for WIF
+  pull-requests: write # to post the plan output as a PR comment
+
+jobs:
+  terraform-plan:
+    name: Terraform plan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform plan
+        run: terraform plan -no-color -out=tfplan
+        env:
+          TF_VAR_database_url: ${{ secrets.DATABASE_URL }}
+
+  terraform-apply:
+    name: Terraform apply
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production # gate with a required reviewer in repo settings
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve
+        env:
+          TF_VAR_database_url: ${{ secrets.DATABASE_URL }}

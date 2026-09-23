@@ -6,7 +6,11 @@ import httpx
 import pytest
 from sqlalchemy.exc import OperationalError
 
-from infrastructure.celery_app import backfill_symbol_task, backfill_symbols_older_task, symbol_news_ingested_task
+from infrastructure.celery_app import (
+    backfill_symbol_task,
+    backfill_symbols_older_task,
+    symbol_news_ingested_task,
+)
 
 
 def _operational_error() -> OperationalError:

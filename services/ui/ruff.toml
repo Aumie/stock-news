@@ -1,0 +1,12 @@
+target-version = "py312"
+line-length = 110
+extend-exclude = ["auth/v1"]  # generated protobuf/grpc stubs, not hand-written
+
+[lint]
+# Real-bug-catching rules only for this CI pass: unused/undefined names,
+# import sorting. Broader stylistic/modernization rule sets (UP, DTZ, BLE,
+# ...) surfaced 100+ pre-existing hits across the codebase on the first CI
+# pass — worth adopting later as its own deliberate cleanup, not as a side
+# effect of turning CI on.
+select = ["E", "F", "I"]
+ignore = ["E501"]  # long explanatory comments are this project's norm

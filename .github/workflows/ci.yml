@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  python-tests:
+    name: Python tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    # query-api/processing import torch + sentence-transformers at collection
+    # time (test_end_to_end.py imports SentenceTransformerEmbedder even
+    # though the test itself skips without Postgres) — cold torch import
+    # alone measured ~9 minutes locally on first run. 20m gives headroom
+    # without letting a genuine hang run to GitHub's 6h default.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [query-api, processing, ui, daily-batch]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stock-news
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply schema
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d stock-news -f infra/postgres/init.sql
+        working-directory: .
+        env:
+          PGPASSWORD: postgres
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: services/${{ matrix.service }}/uv.lock
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: pytest
+        run: uv run python -m pytest -v
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/stock-news
+          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/stock-news
+          JWT_SIGNING_SECRET: ci-test-secret
+          ANTHROPIC_API_KEY: ""
+          FINNHUB_API_KEY: ""
+          MARKETAUX_API_KEY: ""
+
+  go-tests:
+    name: Go tests (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth, poller]
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: services/${{ matrix.service }}/go.mod
+          cache-dependency-path: services/${{ matrix.service }}/go.sum
+
+      - name: gofmt check
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test (unit)
+        run: go test ./internal/...

@@ -1,7 +1,6 @@
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
-import pytest
 
 from application.backfill_service import BackfillService
 from infrastructure.finnhub_news_client import NewsArticle

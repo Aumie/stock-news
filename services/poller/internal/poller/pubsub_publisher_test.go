@@ -18,13 +18,22 @@ import (
 // PUBSUB_EMULATOR_HOST — this project doesn't fake the pubsub client,
 // consistent with verifying real infrastructure wherever possible
 // (backend-service-delivery skill). Skips cleanly if not running.
+//
+// grpc.NewClient never dials eagerly, so it can't be used on its own to
+// detect "nothing is listening" — found live via CI setup work: without a
+// real connection attempt, this used to hang for a full 60s (the default
+// context deadline on the admin calls further down the test) instead of
+// skipping, whenever the emulator wasn't running. A short-lived dial with
+// grpc.WithBlock forces a real connection attempt within the timeout.
 func startEmulatorOrSkip(t *testing.T) string {
 	t.Helper()
 	addr := os.Getenv("PUBSUB_EMULATOR_HOST")
 	if addr == "" {
 		addr = "localhost:8681"
 	}
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(dialCtx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
 	if err != nil {
 		t.Skipf("pubsub emulator not reachable at %s: %v", addr, err)
 	}

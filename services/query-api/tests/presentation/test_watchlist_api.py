@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 from application.watchlist_service import WatchlistService
 from domain.watchlist import WatchlistEntry
 from infrastructure.finnhub_lookup import InvalidSymbolError, SymbolLookupUnavailableError
-from presentation.auth_dependency import require_auth
 from presentation.watchlist_api import build_watchlist_router
 
 SECRET = "test-secret-at-least-32-bytes-long!"

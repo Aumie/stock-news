@@ -1,7 +1,11 @@
 import httpx
 import pytest
 
-from infrastructure.finnhub_lookup import FinnhubSymbolLookup, InvalidSymbolError, SymbolLookupUnavailableError
+from infrastructure.finnhub_lookup import (
+    FinnhubSymbolLookup,
+    InvalidSymbolError,
+    SymbolLookupUnavailableError,
+)
 
 SEARCH_RESPONSE = {
     "count": 8,

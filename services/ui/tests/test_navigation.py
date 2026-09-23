@@ -25,6 +25,11 @@ st.navigation(build_pages()).run()
 
 def test_navigation_does_not_raise_url_pathname_collision():
     at = AppTest.from_string(_SCRIPT)
-    at.run()
+    # AppTest's default 3s run timeout is tight enough to flake under load
+    # (observed locally when run after the rest of the suite, and CI runners
+    # are typically slower than a dev machine) — this only affects how long
+    # the harness waits for Streamlit's script-runner to finish starting,
+    # not the behavior under test.
+    at.run(timeout=15)
 
     assert at.exception == []
