@@ -1,4 +1,5 @@
 terraform {
+  # no-op comment: verifying CI/CD's terraform-plan job authenticates via WIF
   required_version = ">= 1.5"
 
   required_providers {
