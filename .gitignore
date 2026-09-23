@@ -4,12 +4,12 @@ __pycache__/
 .venv/
 .pytest_cache/
 *.egg-info/
-coverage.json
+services/*/coverage.json
 .coverage
 
 # Go
 services/*/tmp/
-coverage.out
+services/*/coverage.out
 
 # dbt
 target/
