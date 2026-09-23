@@ -1,4 +1,6 @@
 terraform {
+  # no-op comment: checking for real state drift and verifying the new
+  # production environment approval gate actually pauses terraform-apply
   required_version = ">= 1.5"
 
   required_providers {
