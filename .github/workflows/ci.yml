@@ -68,8 +68,15 @@ jobs:
       - name: pytest
         run: uv run python -m pytest -v
         env:
-          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/stock-news
-          TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/stock-news
+          # daily-batch connects with raw psycopg (main.py itself strips
+          # "+psycopg" before calling psycopg.connect() — see its own
+          # dbt_env_from_database_url/run_daily_batch), which chokes on the
+          # SQLAlchemy-style "+psycopg" driver suffix the other 3 services
+          # need. Found live via CI: test_prices_repo.py's own conn fixture
+          # passes TEST_DATABASE_URL straight to psycopg.connect(), so it
+          # needs the plain form, not the SQLAlchemy form.
+          DATABASE_URL: ${{ matrix.service == 'daily-batch' && 'postgresql://postgres:postgres@localhost:5432/stock-news' || 'postgresql+psycopg://postgres:postgres@localhost:5432/stock-news' }}
+          TEST_DATABASE_URL: ${{ matrix.service == 'daily-batch' && 'postgresql://postgres:postgres@localhost:5432/stock-news' || 'postgresql+psycopg://postgres:postgres@localhost:5432/stock-news' }}
           JWT_SIGNING_SECRET: ci-test-secret
           ANTHROPIC_API_KEY: ""
           FINNHUB_API_KEY: ""
