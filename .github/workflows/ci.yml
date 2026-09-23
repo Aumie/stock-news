@@ -207,10 +207,18 @@ jobs:
           EOF
 
       - name: Commit badge
+        # No [skip ci]: main's own commit needs a real CI run against it, or
+        # GitHub's branch CI badge reads HEAD as having no status at all
+        # (shown as failing) rather than the last real run's success —
+        # confirmed live, this is exactly what happened on the first version
+        # of this workflow. Self-terminating regardless: this step already
+        # no-ops when coverage hasn't changed, so the one extra run this
+        # commit triggers computes the same percentage, stages no diff, and
+        # the chain stops there — never a second badge commit in a row.
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add badges/coverage.json
           git diff --staged --quiet && exit 0
-          git commit -m "Update coverage badge (${COVERAGE_PCT}%) [skip ci]"
+          git commit -m "Update coverage badge (${COVERAGE_PCT}%)"
           git push

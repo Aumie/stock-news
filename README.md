@@ -1,7 +1,7 @@
 # Stock News Digest
 
 [![CI](https://github.com/Aumie/stock-news/actions/workflows/ci.yml/badge.svg)](https://github.com/Aumie/stock-news/actions/workflows/ci.yml)
-[![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Aumie/stock-news/main/badges/coverage.json)](https://github.com/Aumie/stock-news/actions/workflows/ci.yml)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FAumie%2Fstock-news%2Fmain%2Fbadges%2Fcoverage.json)](https://github.com/Aumie/stock-news/actions/workflows/ci.yml)
 
 A microservices system that continuously ingests stock-related news for symbols users are watching, embeds it into a vector database, and answers questions about it via retrieval-augmented generation (RAG) — plus a parallel structured-data pipeline (daily prices, a small feature store) for stats. Built as a portfolio project to demonstrate event-driven ingestion, dynamic subscription management, ETL/ELT for both structured and unstructured data, vector search, cloud deployment, and CI/CD with infrastructure as code.
 
