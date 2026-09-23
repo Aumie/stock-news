@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net"
 	"os"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 func main() {
 	ctx := context.Background()
+	logger := authpkg.NewLogger(envOrDefault("LOG_ENV", "dev"))
 
 	// Shared literal with query-api's DEFAULT_JWT_SIGNING_SECRET — if this is
 	// still in effect at startup, HS256 is symmetric and total auth bypass is
@@ -36,32 +36,35 @@ func main() {
 	port := envOrDefault("PORT", "50051")
 
 	if jwtSecret == defaultJWTSigningSecret {
-		log.Println("WARNING: JWT_SIGNING_SECRET is unset — using the well-known dev default. " +
+		logger.Warn("JWT_SIGNING_SECRET is unset — using the well-known dev default. " +
 			"This allows anyone who has read this source to forge a valid JWT for any user.")
 	}
 
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		log.Fatalf("failed to connect to postgres: %v", err)
+		logger.Error("failed to connect to postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
 	repo := authpkg.NewPostgresRepository(pool)
 	signer := authpkg.NewJWTSigner(jwtSecret)
 	svc := authpkg.NewService(repo, signer)
-	handler := authpkg.NewGRPCHandler(svc)
+	handler := authpkg.NewGRPCHandler(svc, logger)
 
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatalf("failed to listen on port %s: %v", port, err)
+		logger.Error("failed to listen", "port", port, "error", err)
+		os.Exit(1)
 	}
 
 	grpcServer := grpc.NewServer()
 	authv1.RegisterAuthServiceServer(grpcServer, handler)
 
-	log.Printf("auth service listening on :%s", port)
+	logger.Info("auth service listening", "port", port)
 	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		logger.Error("failed to serve", "error", err)
+		os.Exit(1)
 	}
 }
 

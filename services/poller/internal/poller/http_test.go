@@ -17,7 +17,7 @@ func TestTriggerHandler_Returns200OnSuccess(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/trigger", nil)
 	w := httptest.NewRecorder()
 
-	TriggerHandler(deps)(w, req)
+	TriggerHandler(deps, NewLogger("dev"))(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
@@ -37,7 +37,7 @@ func TestTriggerHandler_Returns200OnPartialFailure(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/trigger", nil)
 	w := httptest.NewRecorder()
 
-	TriggerHandler(deps)(w, req)
+	TriggerHandler(deps, NewLogger("dev"))(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200 on partial failure, got %d", w.Code)
@@ -54,7 +54,7 @@ func TestTriggerHandler_Returns500OnHardFailure(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/trigger", nil)
 	w := httptest.NewRecorder()
 
-	TriggerHandler(deps)(w, req)
+	TriggerHandler(deps, NewLogger("dev"))(w, req)
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500 on hard failure, got %d", w.Code)
@@ -66,7 +66,7 @@ func TestTriggerHandler_RejectsNonPOST(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/trigger", nil)
 	w := httptest.NewRecorder()
 
-	TriggerHandler(deps)(w, req)
+	TriggerHandler(deps, NewLogger("dev"))(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected 405 for GET, got %d", w.Code)

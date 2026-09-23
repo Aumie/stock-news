@@ -14,7 +14,7 @@ func TestGRPCHandler_ExchangeIdentity_ReturnsInvalidArgumentForEmptyGoogleSub(t 
 	repo := newFakeRepo()
 	signer := &fakeSigner{}
 	svc := NewService(repo, signer)
-	handler := NewGRPCHandler(svc)
+	handler := NewGRPCHandler(svc, NewLogger("dev"))
 
 	_, err := handler.ExchangeIdentity(context.Background(), &authv1.ExchangeIdentityRequest{
 		GoogleSub: "",
@@ -37,7 +37,7 @@ func TestGRPCHandler_ExchangeIdentity_ReturnsJWTOnSuccess(t *testing.T) {
 	repo := newFakeRepo()
 	signer := &fakeSigner{}
 	svc := NewService(repo, signer)
-	handler := NewGRPCHandler(svc)
+	handler := NewGRPCHandler(svc, NewLogger("dev"))
 
 	resp, err := handler.ExchangeIdentity(context.Background(), &authv1.ExchangeIdentityRequest{
 		GoogleSub: "google-sub-1",
