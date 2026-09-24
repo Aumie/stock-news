@@ -171,3 +171,18 @@ resource "google_cloud_run_v2_service_iam_member" "query_api_invoker_ui" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.ui.email}"
 }
+
+# Real gap found live: processing's QueryApiNotifier (POST
+# /internal/symbol-news-ingested, tells query-api a symbol has fresh news so
+# it can debounce-trigger a daily_symbol_features rebuild) got a real 403
+# "The IAM principal lacks {run.routes.invoke} permission" on every single
+# call, confirmed via query-api's own Cloud Run request logs — this binding
+# was simply never added when that notifier was built. Fixing the caller's
+# missing Authorization header (processing/infrastructure/
+# cloud_run_id_token.py) alone wasn't sufficient without this.
+resource "google_cloud_run_v2_service_iam_member" "query_api_invoker_processing" {
+  name     = google_cloud_run_v2_service.query_api.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.processing.email}"
+}
