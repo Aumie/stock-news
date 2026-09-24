@@ -13,7 +13,12 @@ class WatchlistAPIClient:
         response = httpx.get(
             f"{self._base_url}/watchlist",
             headers=build_headers(self._base_url, jwt),
-            timeout=10.0,
+            # query-api scales to zero (min_instance_count=0); a real cold
+            # start loading its SentenceTransformer model was clocked at
+            # 74.66s live (stats_client.py). This page is often the first
+            # call after a cold instance, so it needs the same headroom —
+            # found live: a real ReadTimeout crashed the Watchlist page.
+            timeout=90.0,
         )
         response.raise_for_status()
         return response.json()
@@ -25,9 +30,11 @@ class WatchlistAPIClient:
             json={"symbol": symbol},
             # The response returns as soon as symbol validation + the DB
             # write finish — the news/price backfill runs in a background
-            # Celery task, not inline (decision_log.md) — so this only needs
-            # to budget for the one synchronous Finnhub /search call.
-            timeout=15.0,
+            # Celery task, not inline (decision_log.md) — but a cold
+            # query-api instance still needs cold-start headroom before it
+            # can even run the one synchronous Finnhub /search call (see
+            # list_symbols' own comment, 74.66s measured live).
+            timeout=90.0,
         )
         if response.status_code == 422:
             return False, response.json().get("detail", "invalid symbol")
@@ -45,6 +52,7 @@ class WatchlistAPIClient:
         response = httpx.delete(
             f"{self._base_url}/watchlist/{symbol}",
             headers=build_headers(self._base_url, jwt),
-            timeout=10.0,
+            # Same query-api cold-start headroom as list_symbols above.
+            timeout=90.0,
         )
         response.raise_for_status()

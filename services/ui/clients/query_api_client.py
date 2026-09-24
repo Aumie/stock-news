@@ -15,7 +15,13 @@ class QueryAPIClient:
             f"{self._base_url}/query",
             headers=build_headers(self._base_url, jwt),
             json={"question": question},
-            timeout=30.0,
+            # query-api scales to zero; a real cold start was clocked at
+            # 74.66s live (stats_client.py, watchlist_client.py). httpx
+            # applies this per-operation (connect/read/write), not as one
+            # deadline for the whole stream, so this only widens how long a
+            # cold connect or a single slow chunk can take — not how long
+            # the LLM's full streamed answer is allowed to run.
+            timeout=90.0,
         ) as response:
             response.raise_for_status()
             for chunk in response.iter_text():

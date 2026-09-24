@@ -18,7 +18,11 @@ class FeedAPIClient:
             f"{self._base_url}/feed",
             headers=build_headers(self._base_url, jwt),
             params=params,
-            timeout=10.0,
+            # Same query-api cold-start headroom as the other clients
+            # (74.66s measured live, stats_client.py/watchlist_client.py) —
+            # the Live Feed page can be the first call after a cold
+            # instance just as easily as Watchlist.
+            timeout=90.0,
         )
         response.raise_for_status()
         return response.json()
@@ -42,9 +46,10 @@ class FeedAPIClient:
             json={"before": before, "before_id": before_id},
             # Pages existing Postgres data (cheap) and, if that's empty,
             # enqueues a background Celery task and returns immediately —
-            # no longer blocks on Finnhub itself (decision_log.md), so a
-            # plain fast timeout is enough.
-            timeout=10.0,
+            # no longer blocks on Finnhub itself (decision_log.md). Still
+            # needs query-api cold-start headroom (74.66s measured live)
+            # since the fast path assumes a warm instance, not a cold one.
+            timeout=90.0,
         )
         response.raise_for_status()
         return response.json()
